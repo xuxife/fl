@@ -1,4 +1,4 @@
-package pl
+package fl
 
 import (
 	"context"
@@ -21,12 +21,19 @@ import (
 //
 //	var _ Job[TaskInput, TaskOutput] = &SomeTask{}
 //
-// Then please implement the following interfaces:
+// Then please implement following interfaces:
 //
 //	String() string	// give this job a name
 //	Input() *I // return the reference input of this job, used to accept input.
-//	Onput(*O)  // fill the output into pointer, used to send output.
+//	Output(*O)  // fill the output into pointer, used to send output.
 //	Do(context.Context) error // the main logic of this job, basically it transform input to output.
+//
+// Tip: you can avoid nasty `Input()` and `Output()` implement by embed `InOut[I, O]`
+//
+//	type SomeTask struct {
+//		Base // always embed Base
+//		InOut[TaskInput, TaskOuput] // inherit Input() and Output() from it
+//	}
 type Job[I, O any] interface {
 	// methods to be implemented
 	Inputer[I]
@@ -52,7 +59,7 @@ type Doer interface {
 
 type job interface {
 	GetStatus() JobStatus
-	setStatus(JobStatus)
+	setStatus(JobStatus) // do not export set status
 	GetCond() Cond
 	SetCond(Cond)
 }
@@ -78,6 +85,8 @@ func (b *Base) GetStatus() JobStatus {
 }
 
 func (b *Base) GetCond() Cond {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
 	if b.cond == nil {
 		return DefaultCond
 	}
@@ -85,6 +94,8 @@ func (b *Base) GetCond() Cond {
 }
 
 func (b *Base) SetCond(cond Cond) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
 	b.cond = cond
 }
 

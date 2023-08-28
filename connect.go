@@ -1,4 +1,4 @@
-package pl
+package fl
 
 import (
 	"context"
@@ -26,7 +26,7 @@ func (c *connect[I1, O1, O2]) String() string {
 	if c.name != "" {
 		return c.name
 	}
-	return fmt.Sprintf("Connect(%s -> %s)", c.first, c.then)
+	return fmt.Sprintf("(%s -> %s)", c.first, c.then)
 }
 
 func (c *connect[I1, O1, O2]) Input() *I1 {
@@ -41,8 +41,6 @@ func (c *connect[I1, O1, O2]) Do(ctx context.Context) error {
 	if err := c.first.Do(ctx); err != nil {
 		return err
 	}
-	var o O1
-	c.first.Output(&o)
-	*c.then.Input() = o
+	c.first.Output(c.then.Input())
 	return c.then.Do(ctx)
 }

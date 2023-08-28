@@ -1,13 +1,20 @@
-package pl
+package fl
 
 import (
 	"context"
 	"fmt"
 )
 
-// NoDependency declares a Job without any dependency
-func NoDependency[T any](t dependent[T]) *dependence {
-	return DirectDependsOn(t)
+var Parallel = NoDependency
+
+// NoDependency declares Job(s) without any dependency,
+// which means they can be run in parallel.
+func NoDependency(jobs ...jobDoer) dependence {
+	ce := make(dependence)
+	for _, j := range jobs {
+		ce[j] = nil
+	}
+	return ce
 }
 
 // DependsOn connects two Jobs with adapter function.
@@ -33,16 +40,15 @@ type adapterBuilder[I, O any] struct {
 	cy dependency[O]
 }
 
-func (a *adapterBuilder[I, O]) WithAdapter(adapter func(O, *I)) *dependence {
-	return &dependence{
-		t: a.t,
-		cys: []struct {
-			job   jobDoer
-			apply func()
+func (a *adapterBuilder[I, O]) WithAdapter(adapter func(O, *I)) dependence {
+	return dependence{
+		a.t: []struct {
+			job       jobDoer
+			getOutput func()
 		}{
 			{
 				job: a.cy,
-				apply: func() {
+				getOutput: func() {
 					var o O
 					a.cy.Output(&o)
 					adapter(o, a.t.Input())
@@ -90,20 +96,26 @@ func WithAdapter[I, O any](cy dependency[O], adapter func(O, *I)) dependency[I] 
 // The logic relationship is:
 //
 // _ -> jobB -> T -> jobA -> _
-func DirectDependsOn[T any](t dependent[T], cys ...dependency[T]) *dependence {
-	ce := &dependence{t: t}
+func DirectDependsOn[T any](t dependent[T], cys ...dependency[T]) dependence {
+	ce := make(dependence)
 	for _, cy := range cys {
-		ce.cys = append(ce.cys, struct {
-			job   jobDoer
-			apply func()
+		ce[t] = append(ce[t], struct {
+			job       jobDoer
+			getOutput func()
 		}{
 			job: cy,
-			apply: func() {
+			getOutput: func() {
 				cy.Output(t.Input())
 			},
 		})
 	}
 	return ce
+}
+
+type jobDoer interface {
+	Doer
+	Reporter
+	job
 }
 
 // dependenT
@@ -121,31 +133,35 @@ type dependency[O any] interface {
 // dependenCE
 //
 //	`dependency[T]` -> (then) -> `depdendent[T]`: this relation is `dependence`
-type dependence struct {
-	t   jobDoer // dependenT
-	cys []struct {
-		job   jobDoer
-		apply func()
-	} // dependenCYs
+type dependence map[jobDoer][]struct {
+	job       jobDoer
+	getOutput func()
 }
 
-type jobDoer interface {
-	Doer
-	Reporter
-	job
+func (d dependence) setInputFor(j jobDoer) {
+	for _, cy := range d[j] {
+		cy.getOutput()
+	}
 }
 
 // ListDependencies list all depdencies in this depdendence
-func (d *dependence) ListDepedencies() []Reporter {
-	reporters := make([]Reporter, 0, len(d.cys))
-	for _, cy := range d.cys {
+func (d dependence) ListDepedencies(j jobDoer) []Reporter {
+	reporters := make([]Reporter, 0, len(d[j]))
+	for _, cy := range d[j] {
 		reporters = append(reporters, cy.job)
 	}
 	return reporters
 }
 
-func (d *dependence) applyAll() {
-	for _, cy := range d.cys {
-		cy.apply()
+func (d dependence) Merge(other dependence) {
+	for j, cys := range other {
+		d[j] = append(d[j], cys...)
+		// track dependency jobs
+		for _, cy := range cys {
+			// this dependency job hasn't been tracked and has no dependency
+			if _, ok := d[cy.job]; !ok {
+				d[cy.job] = nil
+			}
+		}
 	}
 }

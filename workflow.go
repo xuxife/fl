@@ -1,4 +1,4 @@
-package pl
+package fl
 
 import (
 	"context"
@@ -8,88 +8,88 @@ import (
 )
 
 type Workflow interface {
-	// Add appends dependences into Workflow
-	Add(...*dependence) Workflow
+	// Add appends dependences into Workflow.
+	Add(...dependence) Workflow
 
-	// GetJobs returns the jobs and its depedencies in Workflow
+	// GetJobs returns the jobs and its depedencies in Workflow.
 	GetJobs() map[Reporter][]Reporter
 
-	// Run starts the Workflow (blocking)
+	// Run starts and waits the Workflow terminated (blocking current goroutine).
 	Run(context.Context) error
 
-	// IsTerminated returns true if all jobs terminated
+	// IsTerminated returns true if all jobs terminated.
 	IsTerminated() bool
 
-	// GetErrors returns the result errors of jobs in Workflow
-	GetErrors() map[Reporter]error
+	// GetErrors returns the result errors of jobs in Workflow.
+	//
+	// Usage:
+	//
+	//  werr := workflow.GetErrors()
+	//  if werr == nil {
+	//      // all jobs succeeded or workflow has not run
+	//  } else {
+	//      jobAerr, ok := werr[jobA]
+	//      switch {
+	//      case !ok:
+	//          // jobA has not finished or jobA is not in workflow
+	//      case ok && jobAerr == nil:
+	//          // jobA succeeded
+	//      case ok && jobAerr != nil:
+	//          // jobA failed
+	//      }
+	//  }
+	GetErrors() ErrWorkflow
 
 	// Reset resets every job's status to JobStatusPending,
 	// will not reset input/output.
-	Reset()
+	// Reset will return ErrWorkflowIsRunning if the workflow is running.
+	Reset() error
 }
 
 type workflow struct {
 	mutex sync.Mutex
-	jobs  map[jobDoer]*dependence
+	jobs  dependence
 	errs  ErrWorkflow
 
 	oneJobTerminated chan struct{}
 }
 
-func NewWorkflow(ces ...*dependence) Workflow {
+// NewWorkflow constructs a Workflow, append Jobs with depdencies into it with Add.
+func NewWorkflow(ces ...dependence) Workflow {
 	w := &workflow{
 		mutex: sync.Mutex{},
-		jobs:  make(map[jobDoer]*dependence),
+		jobs:  make(dependence),
 	}
 	w.Add(ces...)
 	return w
 }
 
-func (w *workflow) Add(dpdces ...*dependence) Workflow {
+func (w *workflow) Add(ces ...dependence) Workflow {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
 	if w.jobs == nil {
-		w.jobs = make(map[jobDoer]*dependence)
+		w.jobs = make(dependence)
 	}
-	for _, ce := range dpdces {
-		var newCe *dependence
-		t, cys := ce.t, ce.cys
-		if oldCe, ok := w.jobs[t]; ok {
-			// when the dependent is already tracked in w.jobs
-			// append the depdencies after the previous ones
-			newCe = &dependence{
-				t:   t,
-				cys: append(oldCe.cys, cys...),
-			}
-		} else {
-			newCe = ce
-		}
-		w.jobs[t] = newCe
-		// track dependency jobs
-		for _, cy := range cys {
-			if _, ok := w.jobs[cy.job]; !ok {
-				// this dependency job hasn't been tracked and has no dependency
-				w.jobs[cy.job] = &dependence{
-					t:   cy.job,
-					cys: nil,
-				}
-			}
-		}
+	for _, ce := range ces {
+		w.jobs.Merge(ce)
 	}
 	return w
 }
 
 func (w *workflow) GetJobs() map[Reporter][]Reporter {
 	rv := map[Reporter][]Reporter{}
-	for j, ce := range w.jobs {
-		rv[j] = ce.ListDepedencies()
+	for j := range w.jobs {
+		rv[j] = w.jobs.ListDepedencies(j)
 	}
 	return rv
 }
 
-func (w *workflow) GetErrors() map[Reporter]error {
-	rv := map[Reporter]error{}
+func (w *workflow) GetErrors() ErrWorkflow {
+	if w.errs.IsNil() {
+		return nil
+	}
+	rv := make(ErrWorkflow)
 	for j, err := range w.errs {
 		rv[j] = err
 	}
@@ -102,13 +102,8 @@ func (w *workflow) Run(ctx context.Context) error {
 	}
 	defer w.mutex.Unlock()
 
-	// check whether the workflow has been run
-	if w.errs != nil {
-		return ErrWorkflowHasRun
-	}
-
-	// scan the dag, check whether there is a cycle dependency
-	if err := w.scan(); err != nil {
+	// assert the dag of all jobs, whether there is a cycle dependency
+	if err := w.preflight(); err != nil {
 		return err
 	}
 
@@ -120,15 +115,11 @@ func (w *workflow) Run(ctx context.Context) error {
 		w.oneJobTerminated <- struct{}{}
 	}()
 
-loop:
-	for {
-		select {
-		case <-w.oneJobTerminated: // some job is terminated
-			if w.IsTerminated() {
-				break loop
-			}
-			w.tick(ctx)
+	for range w.oneJobTerminated {
+		if w.IsTerminated() {
+			break
 		}
+		w.tick(ctx)
 	}
 
 	// check whether all jobs succeeded without error
@@ -152,21 +143,31 @@ func condScan(deps []Reporter) JobStatus {
 	return jobStatusScaned
 }
 
-func (w *workflow) scan() error {
-	// set all jobs' status to Pending
-	for j := range w.jobs {
-		j.setStatus(JobStatusPending)
+func (w *workflow) preflight() error {
+	// check whether the workflow has been run
+	if w.errs != nil {
+		return ErrWorkflowHasRun
 	}
 
-	// start scanning, mark job as Scanned when all depdencies are Scanned
+	// assert all jobs' status is Pending
+	unexpectStatusJobs := []Reporter{}
+	for j := range w.jobs {
+		if j.GetStatus() != JobStatusPending {
+			unexpectStatusJobs = append(unexpectStatusJobs, j)
+		}
+	}
+	if len(unexpectStatusJobs) > 0 {
+		return ErrUnexpectJobInitStatus(unexpectStatusJobs)
+	}
+
+	// start scanning, mark job as Scanned when its all depdencies are Scanned
 	for {
 		hasNewScanned := false // whether has new job being marked as Scanned this turn
-		for j, ce := range w.jobs {
+		for j := range w.jobs {
 			if j.GetStatus() != JobStatusPending {
 				continue
 			}
-			switch condScan(ce.ListDepedencies()) {
-			case jobStatusScaned:
+			if condScan(w.jobs.ListDepedencies(j)) == jobStatusScaned {
 				hasNewScanned = true
 				j.setStatus(jobStatusScaned)
 			}
@@ -176,14 +177,16 @@ func (w *workflow) scan() error {
 		}
 	}
 
-	// check whether still have jobs not in Scanned
+	// check whether still have jobs not in Scanned,
+	// not Scanned jobs are in a cycle.
 	jobsInCycle := map[Reporter][]Reporter{}
 	for j := range w.jobs {
-		switch j.GetStatus() {
-		case jobStatusScaned:
-			// continue for
-		default:
-			jobsInCycle[j] = w.jobs[j].ListDepedencies()
+		if j.GetStatus() != jobStatusScaned {
+			for _, cy := range w.jobs.ListDepedencies(j) {
+				if cy.GetStatus() != jobStatusScaned {
+					jobsInCycle[j] = append(jobsInCycle[j], cy)
+				}
+			}
 		}
 	}
 	if len(jobsInCycle) > 0 {
@@ -197,27 +200,18 @@ func (w *workflow) scan() error {
 	return nil
 }
 
-func (w *workflow) IsTerminated() bool {
-	for j := range w.jobs {
-		if !j.GetStatus().IsTerminated() {
-			return false
-		}
-	}
-	return true
-}
-
 func (w *workflow) tick(ctx context.Context) {
-	for j, ce := range w.jobs {
+	for j := range w.jobs {
 		if j.GetStatus() != JobStatusPending {
 			continue
 		}
-		newStatus := j.GetCond()(ce.ListDepedencies())
+		newStatus := j.GetCond()(w.jobs.ListDepedencies(j))
 		switch newStatus {
 		case JobStatusPending:
 			// do nothing
 		case JobStatusRunning:
-			j.setStatus(newStatus)
-			ce.applyAll() // apply dependency's output to current input
+			j.setStatus(JobStatusRunning)
+			w.jobs.setInputFor(j) // apply dependency's output to current job's input
 			go func(j jobDoer) {
 				w.errs[j] = j.Do(ctx)
 				if w.errs[j] != nil {
@@ -228,9 +222,9 @@ func (w *workflow) tick(ctx context.Context) {
 				w.oneJobTerminated <- struct{}{}
 			}(j)
 		case JobStatusCanceled:
-			j.setStatus(newStatus)
 			go func(j jobDoer) {
 				w.errs[j] = ErrJobCanceled
+				j.setStatus(JobStatusCanceled)
 				w.oneJobTerminated <- struct{}{}
 			}(j)
 		default:
@@ -239,8 +233,19 @@ func (w *workflow) tick(ctx context.Context) {
 	}
 }
 
-func (w *workflow) Reset() {
-	w.mutex.Lock()
+func (w *workflow) IsTerminated() bool {
+	for j := range w.jobs {
+		if !j.GetStatus().IsTerminated() {
+			return false
+		}
+	}
+	return true
+}
+
+func (w *workflow) Reset() error {
+	if !w.mutex.TryLock() {
+		return ErrWorkflowIsRunning
+	}
 	defer w.mutex.Unlock()
 
 	w.errs = nil
@@ -248,6 +253,7 @@ func (w *workflow) Reset() {
 	for j := range w.jobs {
 		j.setStatus(JobStatusPending)
 	}
+	return nil
 }
 
 type ErrWorkflow map[Reporter]error
@@ -274,9 +280,23 @@ func (e ErrWorkflow) IsNil() bool {
 	return true
 }
 
-var ErrWorkflowIsRunning = fmt.Errorf("workflow is running")
-var ErrWorkflowHasRun = fmt.Errorf("workflow has run")
+var ErrWorkflowIsRunning = fmt.Errorf("workflow is running, please wait for it terminated")
+var ErrWorkflowHasRun = fmt.Errorf("workflow has run, fetch errors with GetErrors() and results from job.Output()")
 var ErrJobCanceled = fmt.Errorf("job canceled")
+
+type ErrUnexpectJobInitStatus []Reporter
+
+func (e ErrUnexpectJobInitStatus) Error() string {
+	builder := new(strings.Builder)
+	builder.WriteString("unexpect job init status: ")
+	jStr := []string{}
+	for _, j := range e {
+		jStr = append(jStr, fmt.Sprintf("%s [%s]", j, j.GetStatus()))
+	}
+	builder.WriteString(strings.Join(jStr, ", "))
+	builder.WriteRune('\n')
+	return builder.String()
+}
 
 type ErrUnexpectConditionResult JobStatus
 
@@ -290,7 +310,14 @@ func (e ErrCycleDependency) Error() string {
 	builder := new(strings.Builder)
 	builder.WriteString("CycleDependency, following jobs introduce cycle dependency:\n")
 	for j, cys := range e {
-		builder.WriteString(fmt.Sprintf("%s: %v\n", j, cys))
+		builder.WriteString(j.String())
+		builder.WriteString(": [")
+		cyStr := []string{}
+		for _, cy := range cys {
+			cyStr = append(cyStr, cy.String())
+		}
+		builder.WriteString(strings.Join(cyStr, ", "))
+		builder.WriteString("]\n")
 	}
 	return builder.String()
 }

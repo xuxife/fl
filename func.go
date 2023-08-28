@@ -1,4 +1,4 @@
-package pl
+package fl
 
 import (
 	"context"
@@ -9,7 +9,7 @@ import (
 // Input constructs a Job that output the given value
 func Input[T any](v T) Job[struct{}, T] {
 	return Func(
-		fmt.Sprintf("Input(%s)", typeOf[T]()),
+		fmt.Sprintf("Input[%s]", typeOf[T]()),
 		func(ctx context.Context, _ struct{}) (T, error) {
 			return v, nil
 		},
@@ -32,7 +32,7 @@ func (f *func_[I, O]) String() string {
 	if f.name != "" {
 		return f.name
 	}
-	return fmt.Sprintf("Func(%s -> %s)", typeOf[I](), typeOf[O]())
+	return fmt.Sprintf("Func(%s) %s", typeOf[I](), typeOf[O]())
 }
 
 func (f *func_[I, O]) Do(ctx context.Context) error {
