@@ -1,4 +1,4 @@
-module github.com/xuxife/fl
+module github.com/xuxife/pl
 
 go 1.20
 

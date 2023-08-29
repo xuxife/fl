@@ -1,4 +1,4 @@
-package fl
+package pl
 
 import (
 	"context"
@@ -223,7 +223,6 @@ func (w *workflow) tick(ctx context.Context) {
 			}(j)
 		case JobStatusCanceled:
 			go func(j jobDoer) {
-				w.errs[j] = ErrJobCanceled
 				j.setStatus(JobStatusCanceled)
 				w.oneJobTerminated <- struct{}{}
 			}(j)
@@ -282,7 +281,6 @@ func (e ErrWorkflow) IsNil() bool {
 
 var ErrWorkflowIsRunning = fmt.Errorf("workflow is running, please wait for it terminated")
 var ErrWorkflowHasRun = fmt.Errorf("workflow has run, fetch errors with GetErrors() and results from job.Output()")
-var ErrJobCanceled = fmt.Errorf("job canceled")
 
 type ErrUnexpectJobInitStatus []Reporter
 
