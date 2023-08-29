@@ -61,7 +61,7 @@ type job interface {
 	GetStatus() JobStatus
 	setStatus(JobStatus) // do not export set status
 	GetCond() Cond
-	SetCond(Cond)
+	When(Cond) // SetCond
 }
 
 var _ job = &Base{}
@@ -93,7 +93,7 @@ func (b *Base) GetCond() Cond {
 	return b.cond
 }
 
-func (b *Base) SetCond(cond Cond) {
+func (b *Base) When(cond Cond) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	b.cond = cond

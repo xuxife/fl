@@ -1,17 +1,17 @@
 # pl - pipeline running in a single Go process
 
-`pl` provides a simple implement of pipeline in a single Go process, like Gitlab Actions, Azure DevOps Pipeline, etc.
+`pl` provides a simple implement of pipeline in a single Go process, like GitHub Actions, Azure DevOps Pipeline, etc.
 
 `pl` supports a minimum set of features:
-- [x] Generic Job
-- [x] Connect Jobs with Dependence
-- [x] Data Flow between Connected Jobs
-- [x] Condition based On Dependency `[ always | succeeded | failed | succeedOrFailed | never ]`
-- [ ] Job Retry
+- [x] Generic job
+- [x] Connect jobs with dependence
+- [x] Data flow between connected jobs
+- [x] Condition based on dependency status `[ always | succeeded | failed | succeedOrFailed | never ]`
+- [ ] Job retry
 
 # Usage
 
-`pl` is implemented with the mind of simplicity and customizability. You can define your own job with strong typed input and output, then connect these jobs into a executable workflow.
+`pl` is implemented with the mind of simplicity and customizability. You can define your own job with strong typed input and output, then connect these jobs into an executable workflow.
 
 ## Define your job
 
@@ -133,6 +133,23 @@ w.Add(
         // here `b` already have been filled by adapter function of previous `DependsOn`
     }),
 )
+```
+
+## Set your job's condition
+
+Job's condition is a function to determine whether this job should be executed or not, based on the status of its dependencies.
+
+Job status and their relations are defined as below:
+![job status relation](https://github.com/xuxife/pl/assets/28257575/e7cc8265-89b9-44b9-8737-c84a884a19c0)
+
+```go
+jobC.When(pl.CondAlways) // jobC will always be executed
+// available conditions
+//  pl.CondAlways: job will always be executed, even its dependencies failed or canceled
+//  pl.CondSucceeded: job will be executed only if all its dependencies succeeded, cancel if any of them failed or canceled.
+//  pl.CondFailed: job will be executed only if any of its dependencies failed, cancel if all of them succeeded or any of them canceled
+//  pl.CondSucceededOrFailed: job will be executed only if all its dependencies succeeded or failed, cancel if any of them canceled
+//  pl.CondNever: job will never be executed
 ```
 
 ## Run your workflow
