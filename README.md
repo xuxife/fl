@@ -140,7 +140,8 @@ w.Add(
 Job's condition is a function to determine whether this job should be executed or not, based on the status of its dependencies.
 
 Job status and their relations are defined as below:
-![job status relation](https://github.com/xuxife/pl/assets/28257575/e7cc8265-89b9-44b9-8737-c84a884a19c0)
+
+<img src="https://github.com/xuxife/pl/assets/28257575/e7cc8265-89b9-44b9-8737-c84a884a19c0" width=400>
 
 ```go
 jobC.When(pl.CondAlways) // jobC will always be executed
