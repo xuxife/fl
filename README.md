@@ -63,14 +63,13 @@ func (j *MyJob) Do(ctx context.Context) error {
 
 ### Toolkit to help you define your job
 
-#### `Inp[I]`
+#### `BaseIn[I]`
 
-`Inp[I]` is a helper generic struct to define your job's input and implements `Input() *I` methods.
+`BaseIn[I]` is a helper generic struct to define your job's input and implements `Input() *I` methods.
 
 ```go
 type MyJob struct {
-    pl.Base
-    pl.Inp[MyJobInput]
+    pl.BaseIn[MyJobInput]
     // other intermidate fields
 }
 
