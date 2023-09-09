@@ -28,11 +28,11 @@ import (
 //	Output(*O)  // fill the output into pointer, used to send output.
 //	Do(context.Context) error // the main logic of this job, basically it transform input to output.
 //
-// Tip: you can avoid nasty `Input()` and `Output()` implement by embed `InOut[I, O]`
+// Tip: you can avoid nasty `Input()` implement by embed `Inp[I]`
 //
 //	type SomeTask struct {
 //		Base // always embed Base
-//		InOut[TaskInput, TaskOuput] // inherit Input() and Output() from it
+//		InP[TaskInput] // inherit Input()
 //	}
 type Job[I, O any] interface {
 	// methods to be implemented
@@ -99,27 +99,15 @@ func (b *Base) When(cond Cond) {
 	b.cond = cond
 }
 
-// InOut is a help struct that can be embeded into your Job implement,
-// such that you can focus on your Do() logic
-type InOut[I, O any] struct {
-	In  I
-	Out O
+// Inp is a help struct that can be embeded into your Job implement,
+// such that you can skip Input() implement.
+type BaseIn[I any] struct {
+	Base
+	In I
 }
 
-func (i *InOut[I, O]) Input() *I {
+func (i *BaseIn[I]) Input() *I {
 	return &i.In
-}
-
-func (i *InOut[I, O]) Output(o *O) {
-	*o = i.Out
-}
-
-func (i *InOut[I, O]) SetInput(v I) {
-	i.In = v
-}
-
-func (i *InOut[I, O]) GetOutput() O {
-	return i.Out
 }
 
 func SetInput[T any](in Inputer[T], v T) {

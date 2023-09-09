@@ -4,7 +4,7 @@
 
 `pl` supports a minimum set of features:
 - [x] Generic job
-- [x] Connect jobs with dependence
+- [x] Connect jobs with dependency relationship
 - [x] Data flow between connected jobs
 - [x] Condition based on dependency status `[ always | succeeded | failed | succeedOrFailed | never ]`
 - [ ] Job retry
@@ -19,7 +19,6 @@
 type MyJob struct {
     pl.Base // must embed pl.Base, it records your job's status and condition function
     MyJobInput // define your input
-    MyJobOutput // define your output
     // other intermidate fields
 }
 
@@ -34,11 +33,10 @@ type MyJobOutput struct {
 // implement your job to satisfy pl.Job interface
 //
 //  type Job[I, O any] interface {
-//  	// methods to be implemented
 //  	Inputer[I]
 //  	Outputer[O]
 //  	Doer
-//  	fmt.Stringer // please give this job a name
+//  	fmt.Stringer
 //      ...
 //  }
 
@@ -54,7 +52,7 @@ func (j *MyJob) Input() *MyJobInput {
 
 // Output accepts a pointer to output type, please fill what need to be outputted to it
 func (j *MyJob) Output(o *MyJobOutput) {
-    *o = j.MyJobOutput
+    // fill o here
 }
 
 // Do is your job's main logic
@@ -65,20 +63,19 @@ func (j *MyJob) Do(ctx context.Context) error {
 
 ### Toolkit to help you define your job
 
-#### `InOut[I, O]`
+#### `Inp[I]`
 
-`InOut[I, O]` is a helper generic struct to define your job's input and output and related methods.
+`Inp[I]` is a helper generic struct to define your job's input and implements `Input() *I` methods.
 
 ```go
 type MyJob struct {
     pl.Base
-    pl.InOut[MyJobInput, MyJobOutput]
+    pl.Inp[MyJobInput]
     // other intermidate fields
 }
 
 // now you can skip implementation of 
 //  Input() *MyJobInput
-//  Output(o *MyJobOutput
 ```
 
 #### `Func`
@@ -86,15 +83,27 @@ type MyJob struct {
 `Func` is what to use when your job can be implemented in a single function.
 
 ```go
-func Func[I, O any](name string, do func(context.Context, I) (O, error)) Job[I, O]
+func Func[I, O any](name string, do func(context.Context, I) (func(*O), error)) Job[I, O]
 
 // example
-var myJob = Func("MyJobName", func(ctx context.Context, input MyJobInput) (MyJobOutput, error) {
-    // do your job here
+var myJob = Func("MyJobName", func(ctx context.Context, input MyJobInput) (func(*MyJobOutput), error) {
+    // do your job here with input
+    return func(output *MyJobOutput) {
+        // fill output here
+    }, nil
 })
 ```
 
 ## Connect your jobs into Workflow
+
+`pl` uses a mental model of this pattern:
+```go
+// if A Depends On B, then
+pl.DependsOn(B, A)
+pl.DirectDependsOn(B, A)
+```
+
+Check [example_test.go](./example_test.go) for a real world example.
 
 ```go
 var w = pl.NewWorkflow()
@@ -137,21 +146,29 @@ w.Add(
 
 ## Set your job's condition
 
-Job's condition is a function to determine whether this job should be executed or not, based on the status of its dependencies.
-
-Job status and their relations are defined as below:
-
-<img src="https://github.com/xuxife/pl/assets/28257575/e7cc8265-89b9-44b9-8737-c84a884a19c0" width=400>
+Job's condition function is a function to determine whether this job should be executed or not, based on the status of its dependencies.
 
 ```go
-jobC.When(pl.CondAlways) // jobC will always be executed
-// available conditions
-//  pl.CondAlways: job will always be executed, even its dependencies failed or canceled
-//  pl.CondSucceeded: job will be executed only if all its dependencies succeeded, cancel if any of them failed or canceled.
-//  pl.CondFailed: job will be executed only if any of its dependencies failed, cancel if all of them succeeded or any of them canceled
-//  pl.CondSucceededOrFailed: job will be executed only if all its dependencies succeeded or failed, cancel if any of them canceled
-//  pl.CondNever: job will never be executed
+// get a job's Status via `GetStatus`
+job.GetStatus() // -> JobStatus
+
+// get a job's Cond function via `GetCond`
+job.GetCond() // -> Cond
+
+// set a job's Cond function via `When`
+job.When(pl.CondAlways)
 ```
+
+Following conditions are available:
+- `CondAlways`: job will always be executed, even its dependencies failed or canceled
+- `CondSucceeded`: job will be executed only if all its dependencies succeeded, be canceled if any of them failed or canceled.
+- `CondFailed`: job will be executed only if any of its dependencies failed, be canceled if all of them succeeded or any of them canceled
+- `CondSucceededOrFailed`: job will be executed only if all its dependencies succeeded or failed, be canceled if any of them canceled
+- `CondNever`: job will never be executed
+
+Their relations are defined as below:
+
+<img src="https://github.com/xuxife/pl/assets/28257575/e7cc8265-89b9-44b9-8737-c84a884a19c0" width=400>
 
 ## Run your workflow
 

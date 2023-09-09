@@ -2,10 +2,10 @@ package pl
 
 import "fmt"
 
-// JobStatus
+// JobStatus is a state machine defined as below:
 //
-//	Pending -> Running or Cancled
-//	Running -> Succeeded or Failed
+//	Pending -> Running | Cancled
+//	Running -> Succeeded | Failed
 type JobStatus string
 
 const (
@@ -37,8 +37,8 @@ type Reporter interface {
 	GetCond() Cond
 }
 
-// Cond is a condition function to determine
-// next status of a Job based on dependency Jobs' statuses.
+// Cond is a condition function to determine the next status of a Job,
+// based on dependency Jobs' statuses.
 //
 // Cond should only return
 //

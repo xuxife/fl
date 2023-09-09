@@ -1,90 +1,57 @@
 package pl
 
-import (
-	"context"
-	"fmt"
-)
-
 var Parallel = NoDependency
 
 // NoDependency declares Job(s) without any dependency,
-// which means they can be run in parallel.
-func NoDependency(jobs ...jobDoer) dependence {
-	ce := make(dependence)
+// which means they are mutually independent, and can be run in parallel.
+func NoDependency(jobs ...jobDoer) Dependency {
+	ce := make(Dependency)
 	for _, j := range jobs {
 		ce[j] = nil
 	}
 	return ce
 }
 
-// DependsOn connects two Jobs with adapter function.
+// DependsOn connects two Jobs with an adapter function.
 //
 // Usage:
 //
 //	DependsOn(
-//		jobA, // Job[I, _]
-//		jobB, // Job[_, O]
+//		jobThen, // Job[I, _]
+//		jobFirst, // Job[_, O]
 //	).WithAdapter(
 //		func(O, *I) {}, // adapter
 //	)
 //
 // The logic relationship is:
 //
-// _ -> jobB -> O -> adapter -> I -> jobA -> _
-func DependsOn[I, O any](t dependent[I], cy dependency[O]) *adapterBuilder[I, O] {
-	return &adapterBuilder[I, O]{t, cy}
+// _ -> jobFirst -> O -> adapter -> I -> jobThen -> _
+func DependsOn[I, O any](r Depender[I], e Dependee[O]) *depBuilder[I, O] {
+	return &depBuilder[I, O]{r, e}
 }
 
-type adapterBuilder[I, O any] struct {
-	t  dependent[I]
-	cy dependency[O]
+type depBuilder[I, O any] struct {
+	r Depender[I]
+	e Dependee[O]
 }
 
-func (a *adapterBuilder[I, O]) WithAdapter(adapter func(O, *I)) dependence {
-	return dependence{
-		a.t: []struct {
-			job       jobDoer
-			getOutput func()
-		}{
+func (a *depBuilder[I, O]) WithAdapter(adapter func(O, *I)) Dependency {
+	return Dependency{
+		a.r: []link{
 			{
-				job: a.cy,
-				getOutput: func() {
+				Depender: a.r,
+				Dependee: a.e,
+				Flow: func() {
 					var o O
-					a.cy.Output(&o)
-					adapter(o, a.t.Input())
+					a.e.Output(&o)
+					adapter(o, a.r.Input())
 				},
 			},
 		},
 	}
 }
 
-// WithAdapter is used to inject an adapter before adding dependency.
-//
-// Usage:
-//
-//	DirectDependsOn(
-//		jobA, // Job[I, _]
-//		WithAdapter(
-//			jobB, // Job[_, O]
-//			func(O, *I) {}, // adapter
-//		), // dependency[I]
-//	)
-func WithAdapter[I, O any](cy dependency[O], adapter func(O, *I)) dependency[I] {
-	return Func(
-		fmt.Sprintf("%s WithAdapter(%s -> %s)", cy, typeOf[O](), typeOf[I]()),
-		func(ctx context.Context, o O) (I, error) {
-			var i I
-			if err := cy.Do(ctx); err != nil {
-				return i, err
-			}
-			cy.Output(&o)
-			adapter(o, &i)
-			return i, nil
-		},
-	)
-}
-
-// DependsOn connects Jobs into dependence, which would feed into Workflow.Add().
+// DirectDependsOn connects Jobs into a Dependency, which would be feeded into Workflow.Add().
 //
 // Usage:
 //
@@ -96,71 +63,103 @@ func WithAdapter[I, O any](cy dependency[O], adapter func(O, *I)) dependency[I] 
 // The logic relationship is:
 //
 // _ -> jobB -> T -> jobA -> _
-func DirectDependsOn[T any](t dependent[T], cys ...dependency[T]) dependence {
-	ce := make(dependence)
-	for _, cy := range cys {
-		ce[t] = append(ce[t], struct {
-			job       jobDoer
-			getOutput func()
-		}{
-			job: cy,
-			getOutput: func() {
-				cy.Output(t.Input())
+func DirectDependsOn[T any](r Depender[T], es ...Dependee[T]) Dependency {
+	d := make(Dependency)
+	for _, e := range es {
+		d[r] = append(d[r], link{
+			Depender: r,
+			Dependee: e,
+			Flow: func() {
+				e.Output(r.Input())
 			},
 		})
 	}
-	return ce
+	return d
+}
+
+// NoFlowDependsOn connects Jobs without any in/out flow.
+func NoFlowDependsOn(r jobDoer, es ...jobDoer) Dependency {
+	d := make(Dependency)
+	for _, e := range es {
+		d[r] = append(d[r], link{
+			Depender: r,
+			Dependee: e,
+		})
+	}
+	return d
 }
 
 type jobDoer interface {
+	job
 	Doer
 	Reporter
-	job
 }
 
-// dependenT
-type dependent[I any] interface {
+type Depender[I any] interface {
 	Inputer[I]
 	jobDoer
 }
 
-// dependenCY
-type dependency[O any] interface {
+type Dependee[O any] interface {
 	Outputer[O]
 	jobDoer
 }
 
-// dependenCE
-//
-//	`dependency[T]` -> (then) -> `depdendent[T]`: this relation is `dependence`
-type dependence map[jobDoer][]struct {
-	job       jobDoer
-	getOutput func()
+type link struct {
+	Depender jobDoer
+	Dependee jobDoer
+	Flow     func() // Flow sends Dependee's Output to Depender's Input
 }
 
-func (d dependence) setInputFor(j jobDoer) {
-	for _, cy := range d[j] {
-		cy.getOutput()
+// Dependency is a relationship between Depender(s) and Dependee(s).
+// We say "A depends on B", then A is Depender, B is Dependee.
+type Dependency map[jobDoer][]link
+
+func (d Dependency) ListDependeeOf(r jobDoer) []jobDoer {
+	var dependees []jobDoer
+	for _, l := range d[r] {
+		dependees = append(dependees, l.Dependee)
+	}
+	return dependees
+}
+
+func (d Dependency) listDepedeeReporterOf(r jobDoer) []Reporter {
+	var dependees []Reporter
+	for _, l := range d[r] {
+		dependees = append(dependees, l.Dependee)
+	}
+	return dependees
+}
+
+func (d Dependency) ListDependerOf(e jobDoer) []jobDoer {
+	var dependers []jobDoer
+	for r, links := range d {
+		for _, l := range links {
+			if l.Dependee == e {
+				dependers = append(dependers, r)
+				break
+			}
+		}
+	}
+	return dependers
+}
+
+// FlowInto flows all Depdenee(s)' Output(s) into the Depender's Input
+func (d Dependency) FlowInto(r jobDoer) {
+	for _, l := range d[r] {
+		if l.Flow != nil {
+			l.Flow()
+		}
 	}
 }
 
-// ListDependencies list all depdencies in this depdendence
-func (d dependence) ListDepedencies(j jobDoer) []Reporter {
-	reporters := make([]Reporter, 0, len(d[j]))
-	for _, cy := range d[j] {
-		reporters = append(reporters, cy.job)
-	}
-	return reporters
-}
-
-func (d dependence) Merge(other dependence) {
-	for j, cys := range other {
-		d[j] = append(d[j], cys...)
-		// track dependency jobs
-		for _, cy := range cys {
-			// this dependency job hasn't been tracked and has no dependency
-			if _, ok := d[cy.job]; !ok {
-				d[cy.job] = nil
+func (d Dependency) Merge(other Dependency) {
+	for r, links := range other {
+		d[r] = append(d[r], links...)
+		// we also need to add the Dependee(s) as 'Depender(s) without any Dependee'
+		for _, l := range links {
+			if _, ok := d[l.Dependee]; !ok {
+				d[l.Dependee] = nil
 			}
 		}
 	}
