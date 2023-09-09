@@ -201,11 +201,12 @@ func (w *Workflow) IsTerminated() bool {
 }
 
 // Err returns the result errors of jobs in Workflow.
+// Err() never returns nil, check with ErrWorkflow.IsNil().
 //
 // Usage:
 //
 //	werr := workflow.Err()
-//	if werr == nil {
+//	if werr.IsNil() {
 //	    // all jobs succeeded or workflow has not run
 //	} else {
 //	    jobErr, ok := werr[job]
