@@ -2,7 +2,10 @@ module github.com/xuxife/pl
 
 go 1.21
 
-require github.com/stretchr/testify v1.8.4
+require (
+	github.com/cenkalti/backoff/v4 v4.2.1
+	github.com/stretchr/testify v1.8.4
+)
 
 require (
 	github.com/davecgh/go-spew v1.1.1 // indirect

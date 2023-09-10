@@ -7,13 +7,13 @@ import (
 )
 
 // Func constructs a Job from an arbitrary function
-func Func[I, O any](name string, do func(context.Context, I) (func(*O), error)) Job[I, O] {
+func Func[I, O any](name string, do func(context.Context, I) (func(*O), error)) Jober[I, O] {
 	return &func_[I, O]{name: name, do: do}
 }
 
 // Adapter constructs a Job that adapts the Output from one job to the Input of another job.
 // Adapter job.Do() will never return error.
-func Adapter[I, O any](name string, fn func(I) func(*O)) Job[I, O] {
+func Adapter[I, O any](name string, fn func(I) func(*O)) Jober[I, O] {
 	if name == "" {
 		name = fmt.Sprintf("Adapter(%s->%s)", typeOf[I](), typeOf[O]())
 	}
@@ -26,7 +26,7 @@ func Adapter[I, O any](name string, fn func(I) func(*O)) Job[I, O] {
 }
 
 // Input constructs a Job that modifies the Input for other jobs.
-func Input[O any](name string, fn func(*O)) Job[struct{}, O] {
+func Input[O any](name string, fn func(*O)) Jober[struct{}, O] {
 	if name == "" {
 		name = fmt.Sprintf("Input(->%s)", typeOf[O]())
 	}
@@ -39,7 +39,7 @@ func Input[O any](name string, fn func(*O)) Job[struct{}, O] {
 }
 
 // Producer constructs a Job that produce the Input for other jobs.
-func Producer[O any](name string, fn func(context.Context) (func(*O), error)) Job[struct{}, O] {
+func Producer[O any](name string, fn func(context.Context) (func(*O), error)) Jober[struct{}, O] {
 	if name == "" {
 		name = fmt.Sprintf("Producer(->%s)", typeOf[O]())
 	}
@@ -52,7 +52,7 @@ func Producer[O any](name string, fn func(context.Context) (func(*O), error)) Jo
 }
 
 // Consumer constructs a Job that consumes the Output from other jobs.
-func Consumer[I any](name string, fn func(context.Context, I) error) Job[I, struct{}] {
+func Consumer[I any](name string, fn func(context.Context, I) error) Jober[I, struct{}] {
 	if name == "" {
 		name = fmt.Sprintf("Consumer(%s->)", typeOf[I]())
 	}

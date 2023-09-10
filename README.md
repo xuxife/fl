@@ -147,17 +147,6 @@ w.Add(
 
 Job's condition function is a function to determine whether this job should be executed or not, based on the status of its dependencies.
 
-```go
-// get a job's Status via `GetStatus`
-job.GetStatus() // -> JobStatus
-
-// get a job's Cond function via `GetCond`
-job.GetCond() // -> Cond
-
-// set a job's Cond function via `When`
-job.When(pl.CondAlways)
-```
-
 Following conditions are available:
 - `CondAlways`: job will always be executed, even its dependencies failed or canceled
 - `CondSucceeded`: job will be executed only if all its dependencies succeeded, be canceled if any of them failed or canceled.

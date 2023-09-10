@@ -6,20 +6,16 @@ import (
 	"sync"
 )
 
-// Job[I, O any] is the basic unit of a workflow.
+// Jober[I, O any] is the basic unit of a workflow.
 //
 //	I: input type
 //	O: output type
 //
-// A Job implement should always embed Base.
+// A Jober implement should always embed Base.
 //
 //	type SomeTask struct {
 //		Base // always embed Base
-//		TaskInput
-//		TaskOnput
 //	}
-//
-//	var _ Job[TaskInput, TaskOutput] = &SomeTask{}
 //
 // Then please implement following interfaces:
 //
@@ -28,13 +24,12 @@ import (
 //	Output(*O)  // fill the output into pointer, used to send output.
 //	Do(context.Context) error // the main logic of this job, basically it transform input to output.
 //
-// Tip: you can avoid nasty `Input()` implement by embed `Inp[I]`
+// Tip: you can avoid nasty `Input()` implement by embed `BaseIn[I]`
 //
 //	type SomeTask struct {
-//		Base // always embed Base
-//		InP[TaskInput] // inherit Input()
+//		BaseIn[TaskInput] // inherit `Input() *TaskInput`
 //	}
-type Job[I, O any] interface {
+type Jober[I, O any] interface {
 	// methods to be implemented
 	Inputer[I]
 	Outputer[O]
@@ -42,7 +37,7 @@ type Job[I, O any] interface {
 	fmt.Stringer // please give this job a name
 
 	// methods that inherit from Base
-	job
+	base
 }
 
 type Inputer[I any] interface {
@@ -57,19 +52,28 @@ type Doer interface {
 	Do(context.Context) error
 }
 
-type job interface {
+type base interface {
 	GetStatus() JobStatus
-	setStatus(JobStatus) // do not export set status
-	GetCond() Cond
-	When(Cond) // SetCond
+	setStatus(JobStatus)
+
+	GetCondition() Condition
+	SetCondition(Condition)
+
+	GetRetryOption() RetryOption
+	SetRetryOption(RetryOption)
+
+	GetWhen() WhenFunc
+	SetWhen(WhenFunc)
 }
 
-var _ job = &Base{}
+var _ base = &Base{}
 
 type Base struct {
 	mutex  sync.RWMutex
 	status JobStatus
-	cond   Cond
+	cond   Condition
+	retry  RetryOption
+	when   WhenFunc
 }
 
 func (b *Base) setStatus(status JobStatus) {
@@ -84,19 +88,43 @@ func (b *Base) GetStatus() JobStatus {
 	return b.status
 }
 
-func (b *Base) GetCond() Cond {
+func (b *Base) GetCondition() Condition {
 	b.mutex.RLock()
 	defer b.mutex.RUnlock()
 	if b.cond == nil {
-		return DefaultCond
+		return DefaultCondition
 	}
 	return b.cond
 }
 
-func (b *Base) When(cond Cond) {
+func (b *Base) SetCondition(cond Condition) {
 	b.mutex.Lock()
 	defer b.mutex.Unlock()
 	b.cond = cond
+}
+
+func (b *Base) GetRetryOption() RetryOption {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	return b.retry
+}
+
+func (b *Base) SetRetryOption(opt RetryOption) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.retry = opt
+}
+
+func (b *Base) GetWhen() WhenFunc {
+	b.mutex.RLock()
+	defer b.mutex.RUnlock()
+	return b.when
+}
+
+func (b *Base) SetWhen(when WhenFunc) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.when = when
 }
 
 // Inp is a help struct that can be embeded into your Job implement,

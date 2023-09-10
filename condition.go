@@ -4,7 +4,7 @@ import "fmt"
 
 // JobStatus is a state machine defined as below:
 //
-//	Pending -> Running | Cancled
+//	Pending -> Running | Cancled | Skipped
 //	Running -> Succeeded | Failed
 type JobStatus string
 
@@ -13,18 +13,19 @@ const (
 	JobStatusRunning   = "Running"
 	JobStatusFailed    = "Failed"
 	JobStatusSucceeded = "Succeeded"
-	JobStatusCanceled  = "Canceled"
+	JobStatusCanceled  = "Canceled" // Canceled is determined by Condition, will be propagated to Dependers except `Always` Condition
+	JobStatusSkipped   = "Skipped"  // Skipped is determined by When or Condition, will be ignored for Dependers
 )
 
 func (s JobStatus) IsTerminated() bool {
-	return s == JobStatusFailed || s == JobStatusSucceeded || s == JobStatusCanceled
+	return s == JobStatusFailed || s == JobStatusSucceeded || s == JobStatusCanceled || s == JobStatusSkipped
 }
 
 func (s JobStatus) String() string {
 	switch s {
 	case JobStatusPending:
 		return "Pending"
-	case JobStatusRunning, JobStatusFailed, JobStatusSucceeded, JobStatusCanceled:
+	case JobStatusRunning, JobStatusFailed, JobStatusSucceeded, JobStatusCanceled, JobStatusSkipped:
 		return string(s)
 	default:
 		return "Unknown"
@@ -34,30 +35,34 @@ func (s JobStatus) String() string {
 type Reporter interface {
 	fmt.Stringer
 	GetStatus() JobStatus
-	GetCond() Cond
+	GetCondition() Condition
+	GetRetryOption() RetryOption
+	GetWhen() WhenFunc
 }
 
-// Cond is a condition function to determine the next status of a Job,
+// Condition is a condition function to determine the next status of a Job,
 // based on dependency Jobs' statuses.
 //
-// Cond should only return
+// Condition should only return
 //
 //	JobStatusPending
 //	JobStatusRunning
 //	JobStatusCanceled
-type Cond func([]Reporter) JobStatus
+//	JobStatusSkipped
+type Condition func([]Reporter) JobStatus
 
 var condReturnStatus = []JobStatus{
 	JobStatusPending,
 	JobStatusRunning,
 	JobStatusCanceled,
+	JobStatusSkipped,
 }
 
-// DefaultCond is the default Cond for Job without calling SetCond()
-var DefaultCond Cond = CondSucceeded
+// DefaultCondition is the default Cond for Job without calling SetCond()
+var DefaultCondition Condition = Succeeded
 
-// CondAlways: all dependencies are succeeded, failed, or canceled
-func CondAlways(deps []Reporter) JobStatus {
+// Always: all dependencies are succeeded, failed, or canceled
+func Always(deps []Reporter) JobStatus {
 	for _, dep := range deps {
 		switch dep.GetStatus() {
 		case JobStatusPending, JobStatusRunning:
@@ -67,8 +72,8 @@ func CondAlways(deps []Reporter) JobStatus {
 	return JobStatusRunning
 }
 
-// CondSucceeded: all dependencies are succeeded
-func CondSucceeded(deps []Reporter) JobStatus {
+// Succeeded: all dependencies are succeeded
+func Succeeded(deps []Reporter) JobStatus {
 	for _, dep := range deps {
 		switch dep.GetStatus() {
 		case JobStatusPending, JobStatusRunning:
@@ -80,8 +85,8 @@ func CondSucceeded(deps []Reporter) JobStatus {
 	return JobStatusRunning
 }
 
-// CondFailed: at least one dependency has failed
-func CondFailed(deps []Reporter) JobStatus {
+// Failed: at least one dependency has failed
+func Failed(deps []Reporter) JobStatus {
 	hasFailed := false
 	for _, dep := range deps {
 		switch dep.GetStatus() {
@@ -99,8 +104,8 @@ func CondFailed(deps []Reporter) JobStatus {
 	return JobStatusCanceled
 }
 
-// CondSucceededOrFailed: all dependencies are succeeded or failed, but cancel if a dependency is canceled
-func CondSucceededOrFailed(deps []Reporter) JobStatus {
+// SucceededOrFailed: all dependencies are succeeded or failed, but cancel if a dependency is canceled
+func SucceededOrFailed(deps []Reporter) JobStatus {
 	for _, dep := range deps {
 		switch dep.GetStatus() {
 		case JobStatusPending, JobStatusRunning:
@@ -112,7 +117,7 @@ func CondSucceededOrFailed(deps []Reporter) JobStatus {
 	return JobStatusRunning
 }
 
-func CondNever(deps []Reporter) JobStatus {
+func Never(deps []Reporter) JobStatus {
 	for _, dep := range deps {
 		switch dep.GetStatus() {
 		case JobStatusPending, JobStatusRunning:

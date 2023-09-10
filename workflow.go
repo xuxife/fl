@@ -7,6 +7,8 @@ import (
 	"sync"
 )
 
+// Workflow is a collection of jobs and connect them with dependency into a directed acyclic graph.
+// Workflow tracks the status of jobs, and execute the jobs in a topological order.
 type Workflow struct {
 	deps      Dependency
 	errs      ErrWorkflow
@@ -16,22 +18,13 @@ type Workflow struct {
 	oneJobTerminated chan struct{} // signals for next tick
 }
 
-// NewWorkflow constructs a Workflow from a bunch of Dependency(s).
-func NewWorkflow(ds ...Dependency) *Workflow {
-	w := &Workflow{
-		deps: make(Dependency),
-	}
-	w.Add(ds...)
-	return w
-}
-
 // Add appends dependences into Workflow.
-func (w *Workflow) Add(ds ...Dependency) *Workflow {
+func (w *Workflow) Add(dbs ...depBuilder) *Workflow {
 	if w.deps == nil {
 		w.deps = make(Dependency)
 	}
-	for _, d := range ds {
-		w.deps.Merge(d)
+	for _, db := range dbs {
+		w.deps.Merge(db.Done())
 	}
 	return w
 }
@@ -161,12 +154,12 @@ func (w *Workflow) tick(ctx context.Context) {
 		if j.GetStatus() != JobStatusPending {
 			continue
 		}
-		switch status := j.GetCond()(w.deps.listDepedeeReporterOf(j)); status {
+		switch status := j.GetCondition()(w.deps.listDepedeeReporterOf(j)); status {
 		case JobStatusPending:
 			// do nothing
 		case JobStatusRunning:
 			j.setStatus(JobStatusRunning)
-			go func(j jobDoer) {
+			go func(j job) {
 				w.deps.FlowInto(j) // apply dependency's output to current job's input
 				err := j.Do(ctx)
 				w.errsMutex.Lock()
@@ -201,12 +194,11 @@ func (w *Workflow) IsTerminated() bool {
 }
 
 // Err returns the result errors of jobs in Workflow.
-// Err() never returns nil, check with ErrWorkflow.IsNil().
 //
 // Usage:
 //
 //	werr := workflow.Err()
-//	if werr.IsNil() {
+//	if werr == nil {
 //	    // all jobs succeeded or workflow has not run
 //	} else {
 //	    jobErr, ok := werr[job]
@@ -222,6 +214,9 @@ func (w *Workflow) IsTerminated() bool {
 func (w *Workflow) Err() ErrWorkflow {
 	w.errsMutex.RLock()
 	defer w.errsMutex.RUnlock()
+	if w.errs.IsNil() {
+		return nil
+	}
 	werr := make(ErrWorkflow)
 	for j, err := range w.errs {
 		werr[j] = err
@@ -243,6 +238,11 @@ func (w *Workflow) Reset() error {
 	}
 	w.errs = nil
 	w.oneJobTerminated = nil
+	return nil
+}
+
+func (w *Workflow) AsJob(name string) job {
+	// TODO
 	return nil
 }
 

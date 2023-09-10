@@ -16,8 +16,16 @@ func (r mockReporter) GetStatus() JobStatus {
 	return JobStatus(r)
 }
 
-func (r mockReporter) GetCond() Cond {
-	return DefaultCond
+func (r mockReporter) GetCondition() Condition {
+	return DefaultCondition
+}
+
+func (r mockReporter) GetRetryOption() RetryOption {
+	return DefaultRetryOption
+}
+
+func (r mockReporter) GetWhen() WhenFunc {
+	return DefaultWhenFunc
 }
 
 func TestCond(t *testing.T) {
@@ -70,7 +78,7 @@ func TestCond(t *testing.T) {
 			c := c
 			t.Run(c.Name, func(t *testing.T) {
 				t.Parallel()
-				assert.Equal(t, c.Expect, CondAlways(c.Reporters))
+				assert.Equal(t, c.Expect, Always(c.Reporters))
 			})
 		}
 	})
@@ -130,7 +138,7 @@ func TestCond(t *testing.T) {
 			c := c
 			t.Run(c.Name, func(t *testing.T) {
 				t.Parallel()
-				assert.Equal(t, c.Expect, CondSucceeded(c.Reporters))
+				assert.Equal(t, c.Expect, Succeeded(c.Reporters))
 			})
 		}
 	})
@@ -190,7 +198,7 @@ func TestCond(t *testing.T) {
 			c := c
 			t.Run(c.Name, func(t *testing.T) {
 				t.Parallel()
-				assert.Equal(t, c.Expect, CondFailed(c.Reporters))
+				assert.Equal(t, c.Expect, Failed(c.Reporters))
 			})
 		}
 	})
@@ -243,7 +251,7 @@ func TestCond(t *testing.T) {
 			c := c
 			t.Run(c.Name, func(t *testing.T) {
 				t.Parallel()
-				assert.Equal(t, c.Expect, CondSucceededOrFailed(c.Reporters))
+				assert.Equal(t, c.Expect, SucceededOrFailed(c.Reporters))
 			})
 		}
 	})
@@ -310,7 +318,7 @@ func TestCond(t *testing.T) {
 			c := c
 			t.Run(c.Name, func(t *testing.T) {
 				t.Parallel()
-				assert.Equal(t, c.Expect, CondNever(c.Reporters))
+				assert.Equal(t, c.Expect, Never(c.Reporters))
 			})
 		}
 	})

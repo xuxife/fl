@@ -4,12 +4,14 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"time"
 
+	"github.com/cenkalti/backoff/v4"
 	"github.com/xuxife/pl"
 )
 
 func ExampleWorkflow() {
-	var w *pl.Workflow
+	w := new(pl.Workflow)
 
 	{
 		// create jobs
@@ -17,29 +19,48 @@ func ExampleWorkflow() {
 		createAKSCluster := new(CreateAKSCluster)
 		getKubeConfig := new(GetAKSClusterCredential)
 
-		// set input
-		createResourceGroup.Input().Name = "rg"
-		createAKSCluster.Input().Name = "aks-cluster"
+		// connect jobs into workflow
+		w.Add(
+			pl.Job(createResourceGroup).
+				// use Input to set the Input of a Job.
+				Input(func(i *CreateResourceGroupInput) {
+					i.Name = "rg"
+					i.Region = "eastus"
+					i.SubscriptionID = "sub"
+				}).
+				Retry(pl.RetryOption{
+					MaxCount: 10,
+					Timeout:  30 * time.Minute,
+					Backoff:  backoff.NewExponentialBackOff(),
+					StopIf: func(n int, since time.Duration, err error) bool {
+						return n > 10
+					},
+				}).
+				Condition(pl.Always).
+				When(pl.Skip),
 
-		w = pl.NewWorkflow(
-			// or use Input to modify the Input of a Job.
-			pl.DirectDependsOn(createResourceGroup, pl.Input("", func(i *CreateResourceGroupInput) {
-				i.Region = "eastus"
-				i.SubscriptionID = "sub"
-			})),
-			// use DependsOn to connects two Jobs with an adapter function.
-			pl.DependsOn(createAKSCluster, createResourceGroup).
-				WithAdapter(func(o CreateResourceGroupOutput, i *CreateAKSClusterInput) {
-					i.ResourceGroupName = o.Name
-					i.SubscriptionID = o.SubscriptionID
-				}),
-			pl.DependsOn(getKubeConfig, createAKSCluster).
-				WithAdapter(func(o CreateAKSClusterOutput, i *GetKubeConfigInput) {
-					i.ClusterName = path.Join(o.SubscriptionID, o.Region, o.ResourceGroupName, o.Name)
-					i.Type = "Admin"
-				}),
-			// use NoDependency or Parallel to declare Job(s) without any dependency
-			pl.NoDependency(
+			pl.Job(createAKSCluster).
+				Input(func(i *CreateAKSClusterInput) {
+					i.Name = "aks-cluster"
+				}).
+				// use DependsOn to connects two Jobs with an adapter function.
+				DependsOn(
+					pl.Adapt(createResourceGroup, func(o CreateResourceGroupOutput, i *CreateAKSClusterInput) {
+						i.ResourceGroupName = o.Name
+						i.SubscriptionID = o.SubscriptionID
+					}),
+				),
+
+			pl.Job(getKubeConfig).
+				DependsOn(
+					pl.Adapt(createAKSCluster, func(o CreateAKSClusterOutput, i *GetKubeConfigInput) {
+						i.ClusterName = path.Join(o.SubscriptionID, o.Region, o.ResourceGroupName, o.Name)
+						i.Type = "Admin"
+					}),
+				),
+
+			// use Jobs to declare Job(s) without any dependency
+			pl.Jobs(
 				// use Func to create a Job from a function.
 				pl.Func("I'm alone", func(ctx context.Context, in struct{}) (func(*string), error) {
 					// use struct{} to present no Input/Output
@@ -58,8 +79,9 @@ func ExampleWorkflow() {
 			}
 		})
 		w.Add(
-			pl.DirectDependsOn(passRegion, createResourceGroup),
-			pl.DirectDependsOn(createAKSCluster, passRegion),
+			// use DirectDependsOn to connect two jobs with matched Input and Output
+			pl.Job(createAKSCluster).DirectDependsOn(passRegion),
+			pl.Job(passRegion).DirectDependsOn(createResourceGroup),
 		)
 	}
 
@@ -76,25 +98,21 @@ func ExampleWorkflow() {
 				fmt.Println("patched!")
 				return nil
 			})
-			for _, depender := range w.Dep().ListDependerOf(createAKSCluster) {
-				w.Add(
-					// use NoFlowDependsOn if a data flow is not necessary,
-					// in this case, dependers of createAKSCluster will wait for patchCVE to finish.
-					pl.NoFlowDependsOn(depender, patchCVE),
-				)
-			}
-			// add the patchCVE depends on createAKSCluster AFTER the above loop,
-			// otherwise, the above loop will also add the patchCVE depends on itself.
-			w.Add(pl.DirectDependsOn(patchCVE, createAKSCluster))
+			w.Add(
+				// use Jobs().DependsOn() if a data flow is not necessary,
+				// in this case, dependers of createAKSCluster will wait for patchCVE to finish.
+				pl.Jobs(w.Dep().ListDependerOf(createAKSCluster)...).DependsOn(patchCVE),
+				pl.Job(patchCVE).DirectDependsOn(createAKSCluster),
+			)
 		case *GetAKSClusterCredential:
 			getKubeConfig = typedJob
-			// use Input to modify the Input of a Job.
-			w.Add(pl.DirectDependsOn(
-				getKubeConfig,
-				pl.Input("get User kubeconfig instead", func(i *GetKubeConfigInput) {
-					i.Type = "User"
-				}),
-			))
+			// use Input() to add a dependency that modifies the Input of a Job.
+			w.Add(
+				pl.Job(getKubeConfig).
+					DirectDependsOn(pl.Input("", func(i *GetKubeConfigInput) {
+						i.Type = "User"
+					})),
+			)
 		}
 	}
 
