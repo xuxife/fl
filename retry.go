@@ -10,27 +10,30 @@ import (
 type RetryStopIfFunc func(n uint64, since time.Duration, err error) bool
 
 var DefaultRetryOption = RetryOption{
-	MaxCount: 5,
 	Backoff:  backoff.NewExponentialBackOff(),
+	MaxCount: 5,
 	StopIf:   nil,
 	Timer:    nil,
 }
 
 type RetryOption struct {
-	MaxCount uint64
 	Backoff  backoff.BackOff
+	MaxCount uint64
 	StopIf   RetryStopIfFunc
 	Timer    backoff.Timer
 }
 
 func (opt *RetryOption) Run(ctx context.Context, fn func(context.Context) error, notAfter time.Time) error {
+	b := DefaultRetryOption.Backoff
+	if opt.Backoff != nil {
+		b = opt.Backoff
+	}
 	maxCount := DefaultRetryOption.MaxCount
 	if opt.MaxCount > 0 {
 		maxCount = opt.MaxCount
 	}
-	b := DefaultRetryOption.Backoff
-	if opt.Backoff != nil {
-		b = opt.Backoff
+	if maxCount > 0 {
+		b = backoff.WithMaxRetries(b, maxCount)
 	}
 	stopIf := DefaultRetryOption.StopIf
 	if opt.StopIf != nil {
@@ -57,7 +60,7 @@ func (opt *RetryOption) Run(ctx context.Context, fn func(context.Context) error,
 			count++
 			return err
 		},
-		backoff.WithMaxRetries(b, maxCount),
+		b,
 		nil,
 		timer,
 	)

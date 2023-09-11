@@ -8,7 +8,7 @@ import (
 	"time"
 )
 
-// Workflow is a collection of jobs and connect them with dependency into a directed acyclic graph.
+// Workflow is a collection of connected jobs with dependency into a directed acyclic graph.
 // Workflow tracks the status of jobs, and execute the jobs in a topological order.
 type Workflow struct {
 	deps      Dependency
@@ -299,11 +299,6 @@ func (w *Workflow) Reset() error {
 	}
 	w.errs = nil
 	w.oneJobTerminated = nil
-	return nil
-}
-
-func (w *Workflow) AsJob(name string) job {
-	// TODO
 	return nil
 }
 

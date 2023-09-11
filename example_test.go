@@ -54,18 +54,46 @@ func ExampleWorkflow() {
 						i.Type = "Admin"
 					}),
 				),
+		)
 
-			// use Jobs to declare Job(s) without any dependency
-			pl.Jobs(
-				// use Func to create a Job from a function.
-				pl.Func("I'm alone", func(ctx context.Context, in struct{}) (func(*string), error) {
-					// use struct{} to present no Input/Output
-					return func(s *string) {
-						// set the Output in this callback function
-						*s = "hello world"
-					}, nil
+		// use Func to create a Job from a function.
+		preCheck := pl.Func("precheck", func(ctx context.Context, in string) (func(*string), error) {
+			return func(s *string) {
+				// set the Output in this callback function
+				*s = "hello world " + in
+			}, nil
+		})
+		preWorkflow := new(pl.Workflow).Add(
+			pl.Job(
+				pl.Consumer("helloworld", func(_ context.Context, in string) error {
+					fmt.Println(in)
+					return nil
 				}),
-			),
+			).DirectDependsOn(preCheck),
+		)
+		// use Stage to wrap a Workflow into a Job.
+		preStage := &pl.Stage[PreCheckInput, PreCheckOutput]{
+			Name:     "PreStage",
+			Workflow: preWorkflow,
+			SetInput: func(pci PreCheckInput) {
+				// PreCheckInput is already be filled,
+				// use the input to fill the Input of Jobs inside your Workflow.
+				*preCheck.Input() = pci.BuildID
+			},
+			FillOutput: func(pco *PreCheckOutput) {
+				// fill values into the Output of the Stage
+				pco.Message = pl.GetOutput(preCheck)
+			},
+		}
+
+		// Stage can be used as a Job in a Workflow
+		w.Add(
+			pl.Job(preStage).
+				Input(func(in *PreCheckInput) {
+					in.BuildID = "321"
+				}),
+			pl.Job(createResourceGroup).
+				ExtraDependsOn(preStage),
 		)
 
 		// still able to modify the Workflow if still hold reference to jobs.
@@ -133,6 +161,7 @@ func ExampleWorkflow() {
 	fmt.Println(pl.GetOutput(getKubeConfig))
 
 	// Output:
+	// hello world 321
 	// patched!
 	// <nil>
 	// true
@@ -256,4 +285,12 @@ func (t *testTimer) Stop() {
 	if t.timer != nil {
 		t.timer.Stop()
 	}
+}
+
+type PreCheckInput struct {
+	BuildID string
+}
+
+type PreCheckOutput struct {
+	Message string
 }
