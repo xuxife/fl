@@ -129,8 +129,8 @@ Job's when is a function to determine whether this job should be executed or ski
 
 ### Skip vs Cancel
 
-- Skip: an expected status that the job should not executed.
-- Cancel: an unexpected status that the job should not executed.
+- `Skip`: an expected status that the job should not executed.
+- `Cancel`: an unexpected status that the job is canceled due to some reason (like a dependency failed).
 
 Their relations are defined as below:
 
