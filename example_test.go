@@ -36,8 +36,7 @@ func ExampleWorkflow() {
 						return n > 10
 					},
 				}).
-				Condition(pl.Always).
-				When(pl.Skip),
+				Condition(pl.Always),
 
 			pl.Job(createAKSCluster).
 				Input(func(i *CreateAKSClusterInput) {

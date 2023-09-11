@@ -1,11 +1,11 @@
 package pl
 
-type WhenFunc func(dep Dependency) bool
+type WhenFunc func(*Workflow) bool
 
-var DefaultWhenFunc = WhenFunc(func(dep Dependency) bool {
+var DefaultWhenFunc = WhenFunc(func(*Workflow) bool {
 	return true
 })
 
-func Skip(dep Dependency) bool {
+func Skip(*Workflow) bool {
 	return false
 }

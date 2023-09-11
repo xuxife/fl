@@ -225,15 +225,6 @@ func (d Dependency) ListDependerOf(e job) []job {
 	return dependers
 }
 
-// FlowInto flows all Depdenee(s)' Output(s) into the Depender's Input
-func (d Dependency) FlowInto(r job) {
-	for _, l := range d[r] {
-		if l.Flow != nil {
-			l.Flow()
-		}
-	}
-}
-
 func (d Dependency) Merge(other Dependency) {
 	for r, links := range other {
 		d[r] = append(d[r], links...)

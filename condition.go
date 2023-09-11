@@ -14,7 +14,7 @@ const (
 	JobStatusFailed    = "Failed"
 	JobStatusSucceeded = "Succeeded"
 	JobStatusCanceled  = "Canceled" // Canceled is determined by Condition, will be propagated to Dependers except `Always` Condition
-	JobStatusSkipped   = "Skipped"  // Skipped is determined by When or Condition, will be ignored for Dependers
+	JobStatusSkipped   = "Skipped"  // Skipped is determined by When, will be ignored for Dependers
 )
 
 func (s JobStatus) IsTerminated() bool {
@@ -40,89 +40,57 @@ type Reporter interface {
 	GetWhen() WhenFunc
 }
 
-// Condition is a condition function to determine the next status of a Job,
-// based on dependency Jobs' statuses.
+// Condition is a condition function to determine whether the Job should be Run or Cancel,
+// based on Dependee Jobs' statuses, you can assume the Dependee(s) are terminated.
 //
-// Condition should only return
-//
-//	JobStatusPending
-//	JobStatusRunning
-//	JobStatusCanceled
-//	JobStatusSkipped
-type Condition func([]Reporter) JobStatus
-
-var condReturnStatus = []JobStatus{
-	JobStatusPending,
-	JobStatusRunning,
-	JobStatusCanceled,
-	JobStatusSkipped,
-}
+//	true -> run
+//	false -> cancel
+type Condition func([]Reporter) bool
 
 // DefaultCondition is the default Cond for Job without calling SetCond()
 var DefaultCondition Condition = Succeeded
 
 // Always: all dependencies are succeeded, failed, or canceled
-func Always(deps []Reporter) JobStatus {
-	for _, dep := range deps {
-		switch dep.GetStatus() {
-		case JobStatusPending, JobStatusRunning:
-			return JobStatusPending
-		}
-	}
-	return JobStatusRunning
+func Always(deps []Reporter) bool {
+	return true
 }
 
 // Succeeded: all dependencies are succeeded
-func Succeeded(deps []Reporter) JobStatus {
+func Succeeded(deps []Reporter) bool {
 	for _, dep := range deps {
 		switch dep.GetStatus() {
-		case JobStatusPending, JobStatusRunning:
-			return JobStatusPending
 		case JobStatusFailed, JobStatusCanceled:
-			return JobStatusCanceled
+			return false
 		}
 	}
-	return JobStatusRunning
+	return true
 }
 
 // Failed: at least one dependency has failed
-func Failed(deps []Reporter) JobStatus {
+func Failed(deps []Reporter) bool {
 	hasFailed := false
 	for _, dep := range deps {
 		switch dep.GetStatus() {
-		case JobStatusPending, JobStatusRunning:
-			return JobStatusPending
 		case JobStatusFailed:
 			hasFailed = true
 		case JobStatusCanceled:
-			return JobStatusCanceled
+			return false
 		}
 	}
-	if hasFailed {
-		return JobStatusRunning
-	}
-	return JobStatusCanceled
+	return hasFailed
 }
 
 // SucceededOrFailed: all dependencies are succeeded or failed, but cancel if a dependency is canceled
-func SucceededOrFailed(deps []Reporter) JobStatus {
+func SucceededOrFailed(deps []Reporter) bool {
 	for _, dep := range deps {
 		switch dep.GetStatus() {
-		case JobStatusPending, JobStatusRunning:
-			return JobStatusPending
 		case JobStatusCanceled:
-			return JobStatusCanceled
+			return false
 		}
 	}
-	return JobStatusRunning
+	return true
 }
 
-func Never(deps []Reporter) JobStatus {
-	for _, dep := range deps {
-		switch dep.GetStatus() {
-		case JobStatusPending, JobStatusRunning:
-			return JobStatusPending
-		}
-	}
-	return JobStatusCanceled
+func Never(deps []Reporter) bool {
+	return false
 }

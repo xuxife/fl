@@ -37,7 +37,6 @@ func (w *Workflow) Add(dbs ...depBuilder) *Workflow {
 //		// do something with j
 //		for _, link := range deps {
 //			link.Dependee // do something with j's Dependee
-//			link.Flow() // Flow will send Dependee's output to j's input
 //		}
 //	}
 func (w *Workflow) Dep() Dependency {
@@ -61,10 +60,9 @@ func (w *Workflow) Run(ctx context.Context) error {
 
 	w.errs = make(ErrWorkflow)
 	w.oneJobTerminated = make(chan struct{})
-	go func() {
-		// send the first signal to start tick
-		w.oneJobTerminated <- struct{}{}
-	}()
+
+	// send the first signal to start tick
+	go w.signalTick()
 
 	for range w.oneJobTerminated {
 		if w.IsTerminated() {
@@ -149,37 +147,69 @@ func (w *Workflow) preflight() error {
 	return nil
 }
 
+func (w *Workflow) signalTick() {
+	w.oneJobTerminated <- struct{}{}
+}
+
 func (w *Workflow) tick(ctx context.Context) {
+tick:
 	for j := range w.deps {
 		if j.GetStatus() != JobStatusPending {
 			continue
 		}
-		switch status := j.GetCondition()(w.deps.listDepedeeReporterOf(j)); status {
-		case JobStatusPending:
-			// do nothing
-		case JobStatusRunning:
-			j.setStatus(JobStatusRunning)
-			go func(j job) {
-				w.deps.FlowInto(j) // apply dependency's output to current job's input
-				err := j.Do(ctx)
-				w.errsMutex.Lock()
-				w.errs[j] = err
-				w.errsMutex.Unlock()
-				if err != nil {
-					j.setStatus(JobStatusFailed)
-				} else {
-					j.setStatus(JobStatusSucceeded)
-				}
-				w.oneJobTerminated <- struct{}{}
-			}(j)
-		case JobStatusCanceled:
-			j.setStatus(JobStatusCanceled)
-			go func() {
-				w.oneJobTerminated <- struct{}{}
-			}()
-		default:
-			panic(ErrUnexpectConditionResult(status))
+		// check whether all dependencies are terminated
+		es := w.deps.listDepedeeReporterOf(j)
+		for _, e := range es {
+			if !e.GetStatus().IsTerminated() {
+				continue tick
+			}
 		}
+		// check whether the job should be cancel via Condition
+		cond := j.GetCondition()
+		if cond == nil {
+			cond = DefaultCondition
+		}
+		if !cond(es) {
+			j.setStatus(JobStatusCanceled)
+			go w.signalTick()
+			continue
+		}
+		// check whether the job should be skip via When
+		when := j.GetWhen()
+		if when == nil {
+			when = DefaultWhenFunc
+		}
+		if !when(w) {
+			j.setStatus(JobStatusSkipped)
+			go w.signalTick()
+			continue
+		}
+		j.setStatus(JobStatusRunning)
+		go func(j job) {
+			// apply dependency's output to current job's input
+			for _, l := range w.deps[j] {
+				switch l.Dependee.GetStatus() {
+				case JobStatusSucceeded, JobStatusFailed: // only flow data from succeeded or failed job
+					if l.Flow != nil {
+						l.Flow()
+					}
+				}
+			}
+			// run the job
+			err := j.Do(ctx)
+			// use mutex to guard errs because
+			// for a job not run, the job would not be in errs
+			w.errsMutex.Lock()
+			w.errs[j] = err
+			w.errsMutex.Unlock()
+			// mark the job as succeeded or failed
+			if err != nil {
+				j.setStatus(JobStatusFailed)
+			} else {
+				j.setStatus(JobStatusSucceeded)
+			}
+			w.signalTick()
+		}(j)
 	}
 }
 
@@ -285,12 +315,6 @@ func (e ErrUnexpectJobInitStatus) Error() string {
 		))
 	}
 	return builder.String()
-}
-
-type ErrUnexpectConditionResult JobStatus
-
-func (e ErrUnexpectConditionResult) Error() string {
-	return fmt.Sprintf("unexpect condition result %s, expect only %v", string(e), condReturnStatus)
 }
 
 type ErrCycleDependency map[Reporter][]Reporter
