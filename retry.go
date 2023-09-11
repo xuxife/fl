@@ -23,7 +23,7 @@ type RetryOption struct {
 	Timer    backoff.Timer
 }
 
-func (opt *RetryOption) Run(ctx context.Context, fn func(context.Context) error) error {
+func (opt *RetryOption) Run(ctx context.Context, fn func(context.Context) error, notAfter time.Time) error {
 	maxCount := DefaultRetryOption.MaxCount
 	if opt.MaxCount > 0 {
 		maxCount = opt.MaxCount
@@ -48,6 +48,9 @@ func (opt *RetryOption) Run(ctx context.Context, fn func(context.Context) error)
 	return backoff.RetryNotifyWithTimer(
 		func() error {
 			err = fn(ctx)
+			if !notAfter.IsZero() && time.Now().After(notAfter) { // timeouted
+				err = backoff.Permanent(err)
+			}
 			if stopIf != nil && stopIf(count, time.Since(start), err) {
 				err = backoff.Permanent(err)
 			}

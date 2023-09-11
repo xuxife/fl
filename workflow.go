@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"time"
 )
 
 // Workflow is a collection of jobs and connect them with dependency into a directed acyclic graph.
@@ -192,8 +193,10 @@ tick:
 
 func (w *Workflow) kickoff(ctx context.Context, j job) {
 	// set timeout for the job
+	var notAfter time.Time
 	timeout := j.getTimeout()
 	if timeout > 0 {
+		notAfter = time.Now().Add(timeout)
 		var cancel func()
 		ctx, cancel = context.WithTimeout(ctx, timeout)
 		defer cancel()
@@ -204,7 +207,7 @@ func (w *Workflow) kickoff(ctx context.Context, j job) {
 	if retry := j.getRetry(); retry == nil { // disable retry
 		err = do(ctx)
 	} else {
-		err = retry.Run(ctx, do)
+		err = retry.Run(ctx, do, notAfter)
 	}
 	// use mutex to guard errs because
 	// for a job not run, the job would not be in errs
