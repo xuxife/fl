@@ -80,7 +80,7 @@ func ExampleWorkflow() {
 				// use the input to fill the Input of Jobs inside your Workflow.
 				*preCheck.Input() = pci.BuildID
 			},
-			FillOutput: func(pco *PreCheckOutput) {
+			SetOutput: func(pco *PreCheckOutput) {
 				// fill values into the Output of the Stage
 				pco.Message = pl.GetOutput(preCheck)
 			},

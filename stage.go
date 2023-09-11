@@ -9,10 +9,10 @@ import (
 // It's feasible to use Stage inside Workflow.Add()
 type Stage[I, O any] struct {
 	BaseIn[I]
-	Name       string
-	Workflow   *Workflow
-	SetInput   func(I)  // SetInput from Stage Input to the inside Jobs' Input
-	FillOutput func(*O) // FillOutput fills the Stage Output from the inside Jobs' Output
+	Name      string
+	Workflow  *Workflow
+	SetInput  func(I)  // SetInput sets the inside Jobs' Input from Stage Input
+	SetOutput func(*O) // SetOutput sets the Stage Output from the inside Jobs' Output
 }
 
 func (s *Stage[I, O]) String() string {
@@ -23,8 +23,8 @@ func (s *Stage[I, O]) String() string {
 }
 
 func (s *Stage[I, O]) Output(o *O) {
-	if s.FillOutput != nil {
-		s.FillOutput(o)
+	if s.SetOutput != nil {
+		s.SetOutput(o)
 	}
 }
 
