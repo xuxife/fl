@@ -99,13 +99,14 @@ var myJob = Func("MyJobName", func(ctx context.Context, input MyJobInput) (func(
 ```go
 w.Add(
     pl.Job(A).
-        Input(func(i *InputA) { /* fill A's input here */ }).
-        DependsOn(B, /* adapter function */).  // if A Depends On B, then
-        DirectDependsOn(C, D).  // multiple dependencies
-        Retry(pl.RetryOption{ /* retry options */ }).
-        Timeout(10*time.Minute). // set timeout
-        Condition(pl.SucceededOrFailed). // set condition
-        When(pl.Skip), // set when to skip this job
+        Input(func(i *InputA) { /* fill A's input here */ }).   // set input
+        DependsOn(B, /* adapter function */).                   // if A Depends On B, then
+        DirectDependsOn(C, D).                                  // multiple dependencies
+        Retry(pl.RetryOption{ /* retry options */ }).           // set retry
+        Timeout(10*time.Minute).                                // set timeout
+        Condition(pl.SucceededOrFailed).                        // set condition
+        When(pl.Skip),                                          // set when to skip this job
+
     pl.Jobs(C, D).
         DependsOn(E, F),
 )
