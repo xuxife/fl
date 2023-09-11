@@ -7,7 +7,7 @@
 - [x] Connect jobs with dependency relationship
 - [x] Data flow between connected jobs
 - [x] Condition based on dependency status `[ always | succeeded | failed | succeedOrFailed | never ]`
-- [ ] Job retry
+- [x] Job retry
 
 # Usage
 
@@ -30,9 +30,9 @@ type MyJobOutput struct {
     // define your output here
 }
 
-// implement your job to satisfy pl.Job interface
+// implement your job to satisfy pl.Jober interface
 //
-//  type Job[I, O any] interface {
+//  type Jober[I, O any] interface {
 //  	Inputer[I]
 //  	Outputer[O]
 //  	Doer
@@ -97,66 +97,43 @@ var myJob = Func("MyJobName", func(ctx context.Context, input MyJobInput) (func(
 
 `pl` uses a mental model of this pattern:
 ```go
-// if A Depends On B, then
-pl.DependsOn(B, A)
-pl.DirectDependsOn(B, A)
+w.Add(
+    pl.Job(A).
+        Input(func(i *InputA) { /* fill A's input here */ }).
+        DependsOn(B, /* adapter function */).  // if A Depends On B, then
+        DirectDependsOn(C, D).  // multiple dependencies
+        Retry(pl.RetryOption{ /* retry options */ }).
+        Timeout(10*time.Minute). // set timeout
+        Condition(pl.SucceededOrFailed). // set condition
+        When(pl.Skip), // set when to skip this job
+    pl.Jobs(C, D).
+        DependsOn(E, F),
+)
 ```
 
 Check [example_test.go](./example_test.go) for a real world example.
 
-```go
-var w = pl.NewWorkflow()
+## Condition and When
 
-// assume you have defined your jobs
-var (
-    jobA Job[AIn, AOut] = nil
-    jobB Job[BIn, BOut] = nil
-    jobC Job[BOut, COut] = nil
-
-    jobD = nil
-    jobE = nil
-)
-
-// connect your jobs by `DependsOn`, `DirectDependsOn`, ...
-w.Add(
-    // jobB depends on jobA,
-    // means jobA must be executed before jobB,
-    // and jobA's output will be flowed into jobB's input
-    // via an adapter function you define.
-    DependsOn(jobB, jobA).WithAdapter(func(a AOut, b *BIn) {
-        // define your adapter function here
-    }),
-    // jobC depends on jobB,
-    // and jobC's input is exactly jobB's output.
-    DirectDependsOn(jobC, jobB),
-    // use `Parallel` or `NoDependency` to add jobs without dependency.
-    Parallel(jobD, jobE),
-)
-
-w.Add(
-    // Add is idempotent, you can add jobs to workflow multiple times.
-    Parallel(jobD, jobE),
-    // `DependsOn` with adapter function and `DirectDependsOn` will be executed in order, FIFO.
-    DependsOn(jobB, jobA).WithAdapter(func(a AOut, b *BIn) {
-        // here `b` already have been filled by adapter function of previous `DependsOn`
-    }),
-)
-```
-
-## Set your job's condition
-
-Job's condition function is a function to determine whether this job should be executed or not, based on the status of its dependencies.
+Job's condition is a function to determine whether this job should be executed or cancel, based on the status of its dependencies.
 
 Following conditions are available:
-- `CondAlways`: job will always be executed, even its dependencies failed or canceled
-- `CondSucceeded`: job will be executed only if all its dependencies succeeded, be canceled if any of them failed or canceled.
-- `CondFailed`: job will be executed only if any of its dependencies failed, be canceled if all of them succeeded or any of them canceled
-- `CondSucceededOrFailed`: job will be executed only if all its dependencies succeeded or failed, be canceled if any of them canceled
-- `CondNever`: job will never be executed
+- `Always`: job will always be executed, even its dependencies failed or canceled
+- `Succeeded`: job will be executed only if all its dependencies succeeded, be canceled if any of them failed or canceled.
+- `Failed`: job will be executed only if any of its dependencies failed, be canceled if all of them succeeded or any of them canceled
+- `SucceededOrFailed`: job will be executed only if all its dependencies succeeded or failed, be canceled if any of them canceled
+- `Never`: job will never be executed
+
+Job's when is a function to determine whether this job should be executed or skipped.
+
+### Skip vs Cancel
+
+- Skip: an expected status that the job should not executed.
+- Cancel: an unexpected status that the job should not executed.
 
 Their relations are defined as below:
 
-<img src="https://github.com/xuxife/pl/assets/28257575/e7cc8265-89b9-44b9-8737-c84a884a19c0" width=400>
+<img src="https://github.com/xuxife/pl/assets/28257575/bc398419-471e-49ba-854b-8b039d33e467" width=400>
 
 ## Run your workflow
 

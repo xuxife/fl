@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 )
 
 // Jober[I, O any] is the basic unit of a workflow.
@@ -52,34 +53,37 @@ type Doer interface {
 	Do(context.Context) error
 }
 
+type Reporter interface {
+	fmt.Stringer
+	GetStatus() JobStatus
+}
+
 type base interface {
 	GetStatus() JobStatus
 	setStatus(JobStatus)
 
-	GetCondition() Condition
-	SetCondition(Condition)
+	getCondition() Condition
+	setCondition(Condition)
 
-	GetRetryOption() RetryOption
-	SetRetryOption(RetryOption)
+	getRetry() *RetryOption
+	setRetry(*RetryOption)
 
-	GetWhen() WhenFunc
-	SetWhen(WhenFunc)
+	getWhen() WhenFunc
+	setWhen(WhenFunc)
+
+	getTimeout() time.Duration
+	setTimeout(time.Duration)
 }
 
 var _ base = &Base{}
 
 type Base struct {
-	mutex  sync.RWMutex
-	status JobStatus
-	cond   Condition
-	retry  RetryOption
-	when   WhenFunc
-}
-
-func (b *Base) setStatus(status JobStatus) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
-	b.status = status
+	mutex   sync.RWMutex
+	status  JobStatus
+	cond    Condition
+	retry   *RetryOption
+	when    WhenFunc
+	timeout time.Duration
 }
 
 func (b *Base) GetStatus() JobStatus {
@@ -88,43 +92,42 @@ func (b *Base) GetStatus() JobStatus {
 	return b.status
 }
 
-func (b *Base) GetCondition() Condition {
-	b.mutex.RLock()
-	defer b.mutex.RUnlock()
-	if b.cond == nil {
-		return DefaultCondition
-	}
+func (b *Base) setStatus(status JobStatus) {
+	b.mutex.Lock()
+	defer b.mutex.Unlock()
+	b.status = status
+}
+
+func (b *Base) getCondition() Condition {
 	return b.cond
 }
 
-func (b *Base) SetCondition(cond Condition) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+func (b *Base) setCondition(cond Condition) {
 	b.cond = cond
 }
 
-func (b *Base) GetRetryOption() RetryOption {
-	b.mutex.RLock()
-	defer b.mutex.RUnlock()
+func (b *Base) getRetry() *RetryOption {
 	return b.retry
 }
 
-func (b *Base) SetRetryOption(opt RetryOption) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+func (b *Base) setRetry(opt *RetryOption) {
 	b.retry = opt
 }
 
-func (b *Base) GetWhen() WhenFunc {
-	b.mutex.RLock()
-	defer b.mutex.RUnlock()
+func (b *Base) getWhen() WhenFunc {
 	return b.when
 }
 
-func (b *Base) SetWhen(when WhenFunc) {
-	b.mutex.Lock()
-	defer b.mutex.Unlock()
+func (b *Base) setWhen(when WhenFunc) {
 	b.when = when
+}
+
+func (b *Base) getTimeout() time.Duration {
+	return b.timeout
+}
+
+func (b *Base) setTimeout(timeout time.Duration) {
+	b.timeout = timeout
 }
 
 // Inp is a help struct that can be embeded into your Job implement,

@@ -30,11 +30,8 @@ func ExampleWorkflow() {
 				}).
 				Retry(pl.RetryOption{
 					MaxCount: 10,
-					Timeout:  30 * time.Minute,
 					Backoff:  backoff.NewExponentialBackOff(),
-					StopIf: func(n int, since time.Duration, err error) bool {
-						return n > 10
-					},
+					Timer:    new(testTimer),
 				}).
 				Condition(pl.Always),
 
@@ -72,10 +69,10 @@ func ExampleWorkflow() {
 		)
 
 		// still able to modify the Workflow if still hold reference to jobs.
-		passRegion := pl.Adapter("forget to pass region", func(o CreateResourceGroupOutput) func(i *CreateAKSClusterInput) {
+		passRegion := pl.Func("forget to pass region", func(_ context.Context, o CreateResourceGroupOutput) (func(i *CreateAKSClusterInput), error) {
 			return func(i *CreateAKSClusterInput) {
 				i.Region = o.Region
-			}
+			}, nil
 		})
 		w.Add(
 			// use DirectDependsOn to connect two jobs with matched Input and Output
@@ -108,9 +105,9 @@ func ExampleWorkflow() {
 			// use Input() to add a dependency that modifies the Input of a Job.
 			w.Add(
 				pl.Job(getKubeConfig).
-					DirectDependsOn(pl.Input("", func(i *GetKubeConfigInput) {
+					Input(func(i *GetKubeConfigInput) {
 						i.Type = "User"
-					})),
+					}),
 			)
 		}
 	}
@@ -147,8 +144,14 @@ type CreateResourceGroup struct {
 	pl.BaseIn[CreateResourceGroupInput]
 }
 
+var count = 0
+
 func (c *CreateResourceGroup) Do(ctx context.Context) error {
 	// call azure api to create resource group
+	count++
+	if count < 5 {
+		return fmt.Errorf("retry")
+	}
 	return nil
 }
 
@@ -231,4 +234,26 @@ func (c *GetAKSClusterCredential) String() string {
 type GetKubeConfigInput struct {
 	ClusterName string
 	Type        string // Admin | User | Monitor
+}
+
+type testTimer struct {
+	timer *time.Timer
+}
+
+func (t *testTimer) C() <-chan time.Time {
+	return t.timer.C
+}
+
+func (t *testTimer) Start(duration time.Duration) {
+	if t.timer == nil {
+		t.timer = time.NewTimer(0)
+	} else {
+		t.timer.Reset(0)
+	}
+}
+
+func (t *testTimer) Stop() {
+	if t.timer != nil {
+		t.timer.Stop()
+	}
 }

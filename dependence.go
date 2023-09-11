@@ -1,5 +1,7 @@
 package pl
 
+import "time"
+
 // Job declares a Job ready to connect other Job with dependency, only use in Workflow.Add()
 func Job[T any](r Depender[T]) *jobBuilder[T] {
 	return &jobBuilder[T]{
@@ -14,15 +16,17 @@ type jobBuilder[T any] struct {
 }
 
 // Input sets the Input of the Job.
-//
-// This `Input` method differs from `Input` function (`Input(string, func(*T))`) in that:
-//
-//  1. The `Input` method is executed immediately during the build phase,
-//     while the `Input` function is executed during the run phase.
-//
-//  2. The `Input` method not create a new Job instance, while the `Input` function does.
 func (jb *jobBuilder[T]) Input(fn func(*T)) *jobBuilder[T] {
-	fn(jb.r.Input())
+	jb.cy[jb.r] = append(jb.cy[jb.r], link{
+		Flow: func() {
+			fn(jb.r.Input())
+		},
+	})
+	return jb
+}
+
+func (jb *jobBuilder[T]) Timeout(timeout time.Duration) *jobBuilder[T] {
+	jb.r.setTimeout(timeout)
 	return jb
 }
 
@@ -92,17 +96,17 @@ func (jb *jobBuilder[T]) ExtraDependsOn(jobs ...job) *jobBuilder[T] {
 }
 
 func (jb *jobBuilder[T]) Condition(cond Condition) *jobBuilder[T] {
-	jb.r.SetCondition(cond)
+	jb.r.setCondition(cond)
 	return jb
 }
 
 func (jb *jobBuilder[T]) Retry(opt RetryOption) *jobBuilder[T] {
-	jb.r.SetRetryOption(opt)
+	jb.r.setRetry(&opt)
 	return jb
 }
 
 func (jb *jobBuilder[T]) When(when WhenFunc) *jobBuilder[T] {
-	jb.r.SetWhen(when)
+	jb.r.setWhen(when)
 	return jb
 }
 
@@ -110,7 +114,7 @@ func (jb *jobBuilder[T]) Done() Dependency {
 	return jb.cy
 }
 
-// Jobs declares a bunch of Jobs ready to connect other Job with dependency.
+// Jobs declares a series of Jobs ready to connect other Jobs with dependency.
 //
 // Usage:
 //
@@ -144,21 +148,21 @@ func (jb jobsBuilder) DependsOn(dependees ...job) jobsBuilder {
 
 func (jb jobsBuilder) Condition(cond Condition) jobsBuilder {
 	for j := range jb {
-		j.SetCondition(cond)
+		j.setCondition(cond)
 	}
 	return jb
 }
 
 func (jb jobsBuilder) Retry(opt RetryOption) jobsBuilder {
 	for j := range jb {
-		j.SetRetryOption(opt)
+		j.setRetry(&opt)
 	}
 	return jb
 }
 
 func (jb jobsBuilder) When(when WhenFunc) jobsBuilder {
 	for j := range jb {
-		j.SetWhen(when)
+		j.setWhen(when)
 	}
 	return jb
 }
@@ -199,7 +203,9 @@ type Dependency map[job][]link
 func (d Dependency) ListDependeeOf(r job) []job {
 	var dependees []job
 	for _, l := range d[r] {
-		dependees = append(dependees, l.Dependee)
+		if l.Dependee != nil {
+			dependees = append(dependees, l.Dependee)
+		}
 	}
 	return dependees
 }
@@ -207,7 +213,9 @@ func (d Dependency) ListDependeeOf(r job) []job {
 func (d Dependency) listDepedeeReporterOf(r job) []Reporter {
 	var dependees []Reporter
 	for _, l := range d[r] {
-		dependees = append(dependees, l.Dependee)
+		if l.Dependee != nil {
+			dependees = append(dependees, l.Dependee)
+		}
 	}
 	return dependees
 }
@@ -230,8 +238,10 @@ func (d Dependency) Merge(other Dependency) {
 		d[r] = append(d[r], links...)
 		// we also need to add the Dependee(s) as 'Depender(s) without any Dependee'
 		for _, l := range links {
-			if _, ok := d[l.Dependee]; !ok {
-				d[l.Dependee] = nil
+			if l.Dependee != nil {
+				if _, ok := d[l.Dependee]; !ok {
+					d[l.Dependee] = nil
+				}
 			}
 		}
 	}

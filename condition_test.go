@@ -20,7 +20,7 @@ func (r mockReporter) GetCondition() Condition {
 	return DefaultCondition
 }
 
-func (r mockReporter) GetRetryOption() RetryOption {
+func (r mockReporter) GetRetry() RetryOption {
 	return DefaultRetryOption
 }
 

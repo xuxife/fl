@@ -1,7 +1,5 @@
 package pl
 
-import "fmt"
-
 // JobStatus is a state machine defined as below:
 //
 //	Pending -> Running | Cancled | Skipped
@@ -30,14 +28,6 @@ func (s JobStatus) String() string {
 	default:
 		return "Unknown"
 	}
-}
-
-type Reporter interface {
-	fmt.Stringer
-	GetStatus() JobStatus
-	GetCondition() Condition
-	GetRetryOption() RetryOption
-	GetWhen() WhenFunc
 }
 
 // Condition is a condition function to determine whether the Job should be Run or Cancel,

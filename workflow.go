@@ -165,7 +165,7 @@ tick:
 			}
 		}
 		// check whether the job should be cancel via Condition
-		cond := j.GetCondition()
+		cond := j.getCondition()
 		if cond == nil {
 			cond = DefaultCondition
 		}
@@ -175,41 +175,69 @@ tick:
 			continue
 		}
 		// check whether the job should be skip via When
-		when := j.GetWhen()
+		when := j.getWhen()
 		if when == nil {
 			when = DefaultWhenFunc
 		}
-		if !when(w) {
+		if !when() {
 			j.setStatus(JobStatusSkipped)
 			go w.signalTick()
 			continue
 		}
+		// start the job
 		j.setStatus(JobStatusRunning)
-		go func(j job) {
-			// apply dependency's output to current job's input
-			for _, l := range w.deps[j] {
+		go w.kickoff(ctx, j)
+	}
+}
+
+func (w *Workflow) kickoff(ctx context.Context, j job) {
+	// set timeout for the job
+	timeout := j.getTimeout()
+	if timeout > 0 {
+		var cancel func()
+		ctx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
+	}
+	// run the job with retry
+	do := w.do(j)
+	var err error
+	if retry := j.getRetry(); retry == nil { // disable retry
+		err = do(ctx)
+	} else {
+		err = retry.Run(ctx, do)
+	}
+	// use mutex to guard errs because
+	// for a job not run, the job would not be in errs
+	w.errsMutex.Lock()
+	w.errs[j] = err
+	w.errsMutex.Unlock()
+	// mark the job as succeeded or failed
+	if err != nil {
+		j.setStatus(JobStatusFailed)
+	} else {
+		j.setStatus(JobStatusSucceeded)
+	}
+	w.signalTick()
+}
+
+func (w *Workflow) do(j job) func(ctx context.Context) error {
+	return func(ctx context.Context) error {
+		// apply dependee's output to current job's input
+		for _, l := range w.deps[j] {
+			if l.Dependee != nil {
 				switch l.Dependee.GetStatus() {
-				case JobStatusSucceeded, JobStatusFailed: // only flow data from succeeded or failed job
-					if l.Flow != nil {
-						l.Flow()
-					}
+				case JobStatusSucceeded, JobStatusFailed:
+					// only flow data from succeeded or failed job
+					// TODO(xuxife): is this a good decision?
+				default:
+					continue
 				}
+			} // or flow data from Dependee == nil (it's Input)
+			if l.Flow != nil {
+				l.Flow()
 			}
-			// run the job
-			err := j.Do(ctx)
-			// use mutex to guard errs because
-			// for a job not run, the job would not be in errs
-			w.errsMutex.Lock()
-			w.errs[j] = err
-			w.errsMutex.Unlock()
-			// mark the job as succeeded or failed
-			if err != nil {
-				j.setStatus(JobStatusFailed)
-			} else {
-				j.setStatus(JobStatusSucceeded)
-			}
-			w.signalTick()
-		}(j)
+		}
+		return j.Do(ctx)
 	}
 }
 

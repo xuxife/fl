@@ -11,33 +11,6 @@ func Func[I, O any](name string, do func(context.Context, I) (func(*O), error)) 
 	return &func_[I, O]{name: name, do: do}
 }
 
-// Adapter constructs a Job that adapts the Output from one job to the Input of another job.
-// Adapter job.Do() will never return error.
-func Adapter[I, O any](name string, fn func(I) func(*O)) Jober[I, O] {
-	if name == "" {
-		name = fmt.Sprintf("Adapter(%s->%s)", typeOf[I](), typeOf[O]())
-	}
-	return Func(
-		name,
-		func(_ context.Context, i I) (func(*O), error) {
-			return fn(i), nil
-		},
-	)
-}
-
-// Input constructs a Job that modifies the Input for other jobs.
-func Input[O any](name string, fn func(*O)) Jober[struct{}, O] {
-	if name == "" {
-		name = fmt.Sprintf("Input(->%s)", typeOf[O]())
-	}
-	return Func(
-		name,
-		func(_ context.Context, _ struct{}) (func(*O), error) {
-			return fn, nil
-		},
-	)
-}
-
 // Producer constructs a Job that produce the Input for other jobs.
 func Producer[O any](name string, fn func(context.Context) (func(*O), error)) Jober[struct{}, O] {
 	if name == "" {
