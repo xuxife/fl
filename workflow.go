@@ -8,13 +8,14 @@ import (
 	"time"
 )
 
-// Workflow is a collection of connected jobs with dependency into a directed acyclic graph.
-// Workflow tracks the status of jobs, and execute the jobs in a topological order.
+// Workflow represents a collection of connected jobs that form a directed acyclic graph.
+// It tracks the status of each job and executing them in a topological order.
 type Workflow struct {
 	deps      Dependency
 	errs      ErrWorkflow
-	errsMutex sync.RWMutex
+	errsMutex sync.RWMutex // need this because errs are written from each job's goroutine
 
+	waitGroup        sync.WaitGroup // to prevent goroutine leak
 	isRunning        sync.Mutex
 	oneJobTerminated chan struct{} // signals for next tick
 }
@@ -47,7 +48,10 @@ func (w *Workflow) Dep() Dependency {
 	return d
 }
 
-// Run starts and waits the Workflow terminated (blocking current goroutine).
+// Run starts the job execution in topological order,
+// and waits until all jobs terminated.
+//
+// Run blocks the current goroutine.
 func (w *Workflow) Run(ctx context.Context) error {
 	if !w.isRunning.TryLock() {
 		return ErrWorkflowIsRunning
@@ -61,16 +65,23 @@ func (w *Workflow) Run(ctx context.Context) error {
 
 	w.errs = make(ErrWorkflow)
 	w.oneJobTerminated = make(chan struct{})
-
 	// send the first signal to start tick
+	w.waitGroup.Add(1)
 	go w.signalTick()
-
+	// everytime one job terminated, tick
 	for range w.oneJobTerminated {
 		if w.IsTerminated() {
 			break
 		}
 		w.tick(ctx)
 	}
+	// consume all the following singals cooperataed with waitGroup
+	go func() {
+		for range w.oneJobTerminated {
+		}
+	}()
+	w.waitGroup.Wait()
+	close(w.oneJobTerminated)
 
 	// check whether all jobs succeeded without error
 	if w.errs.IsNil() {
@@ -79,15 +90,15 @@ func (w *Workflow) Run(ctx context.Context) error {
 	return w.errs
 }
 
-const jobStatusScaned JobStatus = "Scaned" // a private status for preflight
+const scanned JobStatus = "scanned" // a private status for preflight
 
-func condScan(deps []Reporter) JobStatus {
+func isAllDependeeScanned(deps []Reporter) bool {
 	for _, dep := range deps {
-		if dep.GetStatus() != jobStatusScaned {
-			return JobStatusPending
+		if dep.GetStatus() != scanned {
+			return false
 		}
 	}
-	return jobStatusScaned
+	return true
 }
 
 func (w *Workflow) preflight() error {
@@ -107,17 +118,17 @@ func (w *Workflow) preflight() error {
 		return ErrUnexpectJobInitStatus(unexpectStatusJobs)
 	}
 
-	// assert all dependency would not be a cycle
+	// assert all dependency would not form a cycle
 	// start scanning, mark job as Scanned only when its all depdencies are Scanned
 	for {
 		hasNewScanned := false // whether a new job being marked as Scanned this turn
 		for j := range w.deps {
-			if j.GetStatus() != JobStatusPending {
+			if j.GetStatus() == scanned {
 				continue
 			}
-			if condScan(w.deps.listDepedeeReporterOf(j)) == jobStatusScaned {
+			if isAllDependeeScanned(w.deps.listDepedeeReporterOf(j)) {
 				hasNewScanned = true
-				j.setStatus(jobStatusScaned)
+				j.setStatus(scanned)
 			}
 		}
 		if !hasNewScanned { // break when no new job being Scanned
@@ -129,9 +140,9 @@ func (w *Workflow) preflight() error {
 	// not Scanned jobs are in a cycle.
 	jobsInCycle := map[Reporter][]Reporter{}
 	for j := range w.deps {
-		if j.GetStatus() != jobStatusScaned {
+		if j.GetStatus() != scanned {
 			for _, dep := range w.deps.listDepedeeReporterOf(j) {
-				if dep.GetStatus() != jobStatusScaned {
+				if dep.GetStatus() != scanned {
 					jobsInCycle[j] = append(jobsInCycle[j], dep)
 				}
 			}
@@ -150,6 +161,7 @@ func (w *Workflow) preflight() error {
 
 func (w *Workflow) signalTick() {
 	w.oneJobTerminated <- struct{}{}
+	w.waitGroup.Done()
 }
 
 func (w *Workflow) tick(ctx context.Context) {
@@ -158,7 +170,7 @@ tick:
 		if j.GetStatus() != JobStatusPending {
 			continue
 		}
-		// check whether all dependencies are terminated
+		// check whether all Dependee(s) are terminated
 		es := w.deps.listDepedeeReporterOf(j)
 		for _, e := range es {
 			if !e.GetStatus().IsTerminated() {
@@ -172,6 +184,7 @@ tick:
 		}
 		if !cond(es) {
 			j.setStatus(JobStatusCanceled)
+			w.waitGroup.Add(1)
 			go w.signalTick()
 			continue
 		}
@@ -182,11 +195,13 @@ tick:
 		}
 		if !when() {
 			j.setStatus(JobStatusSkipped)
+			w.waitGroup.Add(1)
 			go w.signalTick()
 			continue
 		}
 		// start the job
 		j.setStatus(JobStatusRunning)
+		w.waitGroup.Add(1)
 		go w.kickoff(ctx, j)
 	}
 }
@@ -327,7 +342,7 @@ func (e ErrWorkflow) IsNil() bool {
 }
 
 var ErrWorkflowIsRunning = fmt.Errorf("workflow is running, please wait for it terminated")
-var ErrWorkflowHasRun = fmt.Errorf("workflow has run, get error with Err(), reset the Workflow with Reset()")
+var ErrWorkflowHasRun = fmt.Errorf("workflow has run, check result error with Err(), reset the Workflow with Reset()")
 
 type ErrUnexpectJobInitStatus []Reporter
 
