@@ -16,63 +16,36 @@ func (r mockReporter) GetStatus() JobStatus {
 	return JobStatus(r)
 }
 
-func (r mockReporter) GetCondition() Condition {
-	return DefaultCondition
-}
-
-func (r mockReporter) GetRetry() RetryOption {
-	return DefaultRetryOption
-}
-
-func (r mockReporter) GetWhen() WhenFunc {
-	return DefaultWhenFunc
-}
-
-func TestCond(t *testing.T) {
+func TestCondition(t *testing.T) {
 	var (
-		pending   = mockReporter(JobStatusPending)
-		running   = mockReporter(JobStatusRunning)
 		failed    = mockReporter(JobStatusFailed)
 		succeeded = mockReporter(JobStatusSucceeded)
 		canceled  = mockReporter(JobStatusCanceled)
+		skipped   = mockReporter(JobStatusSkipped)
 	)
 
-	t.Run("CondAlways", func(t *testing.T) {
+	t.Run("Always", func(t *testing.T) {
 		for _, c := range []struct {
 			Name      string
 			Reporters []Reporter
-			Expect    JobStatus
+			Expect    bool
 		}{
 			{
-				Name:      "nil => Running",
+				Name:      "nil => true",
 				Reporters: nil,
-				Expect:    JobStatusRunning,
+				Expect:    true,
 			},
 			{
-				Name:      "empty => Running",
+				Name:      "empty => true",
 				Reporters: []Reporter{},
-				Expect:    JobStatusRunning,
+				Expect:    true,
 			},
 			{
-				Name: "one Pending => Pending",
+				Name: "all terminated => true",
 				Reporters: []Reporter{
-					pending, succeeded, failed, canceled,
+					succeeded, failed, canceled, skipped,
 				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "one Running => Pending",
-				Reporters: []Reporter{
-					running, succeeded, failed, canceled,
-				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "all terminated => Running",
-				Reporters: []Reporter{
-					succeeded, failed, canceled,
-				},
-				Expect: JobStatusRunning,
+				Expect: true,
 			},
 		} {
 			c := c
@@ -83,56 +56,42 @@ func TestCond(t *testing.T) {
 		}
 	})
 
-	t.Run("CondSucceeded", func(t *testing.T) {
+	t.Run("Succeeded", func(t *testing.T) {
 		for _, c := range []struct {
 			Name      string
 			Reporters []Reporter
-			Expect    JobStatus
+			Expect    bool
 		}{
 			{
-				Name:      "nil => Running",
+				Name:      "nil => true",
 				Reporters: nil,
-				Expect:    JobStatusRunning,
+				Expect:    true,
 			},
 			{
-				Name:      "empty => Running",
+				Name:      "empty => true",
 				Reporters: []Reporter{},
-				Expect:    JobStatusRunning,
+				Expect:    true,
 			},
 			{
-				Name: "one Pending => Pending",
+				Name: "all succeeded => true",
 				Reporters: []Reporter{
-					pending, succeeded, failed, canceled,
+					succeeded, succeeded, skipped,
 				},
-				Expect: JobStatusPending,
+				Expect: true,
 			},
 			{
-				Name: "one Running => Pending",
+				Name: "any failed => false",
 				Reporters: []Reporter{
-					running, succeeded, failed, canceled,
+					succeeded, failed, skipped,
 				},
-				Expect: JobStatusPending,
+				Expect: false,
 			},
 			{
-				Name: "all succeeded => Running",
+				Name: "any canceled => false",
 				Reporters: []Reporter{
-					succeeded, succeeded,
+					succeeded, canceled, skipped,
 				},
-				Expect: JobStatusRunning,
-			},
-			{
-				Name: "any failed => Canceled",
-				Reporters: []Reporter{
-					succeeded, failed,
-				},
-				Expect: JobStatusCanceled,
-			},
-			{
-				Name: "any canceled => Canceled",
-				Reporters: []Reporter{
-					succeeded, canceled,
-				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 		} {
 			c := c
@@ -143,56 +102,42 @@ func TestCond(t *testing.T) {
 		}
 	})
 
-	t.Run("CondFailed", func(t *testing.T) {
+	t.Run("Failed", func(t *testing.T) {
 		for _, c := range []struct {
 			Name      string
 			Reporters []Reporter
-			Expect    JobStatus
+			Expect    bool
 		}{
 			{
-				Name:      "nil => Canceled",
+				Name:      "nil => false",
 				Reporters: nil,
-				Expect:    JobStatusCanceled,
+				Expect:    false,
 			},
 			{
-				Name:      "empty => Canceled",
+				Name:      "empty => false",
 				Reporters: []Reporter{},
-				Expect:    JobStatusCanceled,
+				Expect:    false,
 			},
 			{
-				Name: "one Pending => Pending",
-				Reporters: []Reporter{
-					pending, succeeded, failed, canceled,
-				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "one Running => Pending",
-				Reporters: []Reporter{
-					running, succeeded, failed, canceled,
-				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "all succeeded => Canceled",
+				Name: "all succeeded => false",
 				Reporters: []Reporter{
 					succeeded, succeeded,
 				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 			{
-				Name: "any failed => Running",
+				Name: "any failed => true",
 				Reporters: []Reporter{
 					succeeded, failed,
 				},
-				Expect: JobStatusRunning,
+				Expect: true,
 			},
 			{
-				Name: "any canceled => Canceled",
+				Name: "any canceled => false",
 				Reporters: []Reporter{
 					succeeded, canceled,
 				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 		} {
 			c := c
@@ -203,49 +148,35 @@ func TestCond(t *testing.T) {
 		}
 	})
 
-	t.Run("CondSucceededOrFailed", func(t *testing.T) {
+	t.Run("SucceededOrFailed", func(t *testing.T) {
 		for _, c := range []struct {
 			Name      string
 			Reporters []Reporter
-			Expect    JobStatus
+			Expect    bool
 		}{
 			{
-				Name:      "nil => Running",
+				Name:      "nil => true",
 				Reporters: nil,
-				Expect:    JobStatusRunning,
+				Expect:    true,
 			},
 			{
-				Name:      "empty => Running",
+				Name:      "empty => true",
 				Reporters: []Reporter{},
-				Expect:    JobStatusRunning,
+				Expect:    true,
 			},
 			{
-				Name: "one Pending => Pending",
-				Reporters: []Reporter{
-					pending, succeeded, failed, canceled,
-				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "one Running => Pending",
-				Reporters: []Reporter{
-					running, succeeded, failed, canceled,
-				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "succeeded or failed => Running",
+				Name: "succeeded or failed => true",
 				Reporters: []Reporter{
 					succeeded, failed,
 				},
-				Expect: JobStatusRunning,
+				Expect: true,
 			},
 			{
-				Name: "any canceled => Canceled",
+				Name: "any canceled => false",
 				Reporters: []Reporter{
 					succeeded, canceled,
 				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 		} {
 			c := c
@@ -256,63 +187,49 @@ func TestCond(t *testing.T) {
 		}
 	})
 
-	t.Run("CondNever", func(t *testing.T) {
+	t.Run("Never", func(t *testing.T) {
 		for _, c := range []struct {
 			Name      string
 			Reporters []Reporter
-			Expect    JobStatus
+			Expect    bool
 		}{
 			{
-				Name:      "nil => Canceled",
+				Name:      "nil => false",
 				Reporters: nil,
-				Expect:    JobStatusCanceled,
+				Expect:    false,
 			},
 			{
-				Name:      "empty => Canceled",
+				Name:      "empty => false",
 				Reporters: []Reporter{},
-				Expect:    JobStatusCanceled,
+				Expect:    false,
 			},
 			{
-				Name: "one Pending => Pending",
-				Reporters: []Reporter{
-					pending, succeeded, failed, canceled,
-				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "one Running => Pending",
-				Reporters: []Reporter{
-					running, succeeded, failed, canceled,
-				},
-				Expect: JobStatusPending,
-			},
-			{
-				Name: "succeeded => Canceled",
+				Name: "succeeded => false",
 				Reporters: []Reporter{
 					succeeded,
 				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 			{
-				Name: "failed => Canceled",
+				Name: "failed => false",
 				Reporters: []Reporter{
 					failed,
 				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 			{
-				Name: "succeeded or failed => Canceled",
+				Name: "succeeded or failed => false",
 				Reporters: []Reporter{
 					succeeded, failed,
 				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 			{
-				Name: "any canceled => Canceled",
+				Name: "any canceled => false",
 				Reporters: []Reporter{
 					succeeded, canceled,
 				},
-				Expect: JobStatusCanceled,
+				Expect: false,
 			},
 		} {
 			c := c

@@ -11,7 +11,7 @@ func Func[I, O any](name string, do func(context.Context, I) (func(*O), error)) 
 	return &func_[I, O]{name: name, do: do}
 }
 
-// Producer constructs a Job that produce the Input for other jobs.
+// Producer produces the Input for another job.
 func Producer[O any](name string, fn func(context.Context) (func(*O), error)) Jober[struct{}, O] {
 	if name == "" {
 		name = fmt.Sprintf("Producer(->%s)", typeOf[O]())
@@ -24,7 +24,7 @@ func Producer[O any](name string, fn func(context.Context) (func(*O), error)) Jo
 	)
 }
 
-// Consumer constructs a Job that consumes the Output from other jobs.
+// Consumer consumes the Output from another job.
 func Consumer[I any](name string, fn func(context.Context, I) error) Jober[I, struct{}] {
 	if name == "" {
 		name = fmt.Sprintf("Consumer(%s->)", typeOf[I]())

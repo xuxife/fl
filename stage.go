@@ -6,7 +6,7 @@ import (
 )
 
 // Stage wraps a Workflow into a Job.
-// It's feasible to use Stage inside Workflow.Add()
+// It's totally feasible to use Stage inside another Workflow.Add()
 type Stage[I, O any] struct {
 	BaseIn[I]
 	Name      string

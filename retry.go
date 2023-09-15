@@ -7,11 +7,9 @@ import (
 	"github.com/cenkalti/backoff/v4"
 )
 
-type RetryStopIfFunc func(n uint64, since time.Duration, err error) bool
-
 var DefaultRetryOption = RetryOption{
 	Backoff:  backoff.NewExponentialBackOff(),
-	MaxCount: 5,
+	MaxCount: 10,
 	StopIf:   nil,
 	Timer:    nil,
 }
@@ -19,11 +17,15 @@ var DefaultRetryOption = RetryOption{
 type RetryOption struct {
 	Backoff  backoff.BackOff
 	MaxCount uint64
-	StopIf   RetryStopIfFunc
+	StopIf   func(n uint64, since time.Duration, err error) bool
 	Timer    backoff.Timer
 }
 
-func (opt *RetryOption) Run(ctx context.Context, fn func(context.Context) error, notAfter time.Time) error {
+func (opt *RetryOption) Run(
+	ctx context.Context,
+	fn func(context.Context) error,
+	notAfter time.Time, // the timeout ddl
+) error {
 	b := DefaultRetryOption.Backoff
 	if opt.Backoff != nil {
 		b = opt.Backoff
@@ -47,7 +49,6 @@ func (opt *RetryOption) Run(ctx context.Context, fn func(context.Context) error,
 	count := uint64(0)
 	start := time.Now()
 	var err error
-
 	return backoff.RetryNotifyWithTimer(
 		func() error {
 			err = fn(ctx)
