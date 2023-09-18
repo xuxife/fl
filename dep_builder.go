@@ -99,10 +99,12 @@ func (jb *jobBuilder[T]) ExtraDependsOn(jobs ...job) *jobBuilder[T] {
 //		Input(func(i *I) { ... }).	// this Input will be executed first
 //		DependsOn(j2).				// then receive the Output of j2
 //		Input(func(i *I) { ... }).	// this Input is able to modify the Input again
-func (jb *jobBuilder[T]) Input(fn func(*T)) *jobBuilder[T] {
+func (jb *jobBuilder[T]) Input(fns ...func(*T)) *jobBuilder[T] {
 	jb.cy[jb.r] = append(jb.cy[jb.r], link{
 		Flow: func() {
-			fn(jb.r.Input())
+			for _, fn := range fns {
+				fn(jb.r.Input())
+			}
 		},
 	})
 	return jb
