@@ -65,7 +65,7 @@ type Dependee[O any] interface {
 }
 
 // Dependency is a relationship between Depender(s) and Dependee(s).
-// We say "A depends on B", then A is Depender, B is Dependee.
+// We say "A depends on B", or "B happened-before A", then A is Depender, B is Dependee.
 type Dependency map[job][]link
 
 type link struct {
