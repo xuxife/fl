@@ -15,6 +15,7 @@ type Workflow struct {
 	errs      ErrWorkflow
 	errsMutex sync.RWMutex // need this because errs are written from each job's goroutine
 
+	leaseBucket      chan struct{}  // constraint max concurrency of running jobs
 	waitGroup        sync.WaitGroup // to prevent goroutine leak
 	isRunning        sync.Mutex
 	oneJobTerminated chan struct{} // signals for next tick
@@ -199,6 +200,10 @@ tick:
 			go w.signalTick()
 			continue
 		}
+		// if WithMaxConcurrency is set
+		if w.leaseBucket != nil {
+			w.leaseBucket <- struct{}{} // lease
+		}
 		// start the job
 		j.setStatus(JobStatusRunning)
 		w.waitGroup.Add(1)
@@ -234,6 +239,10 @@ func (w *Workflow) kickoff(ctx context.Context, j job) {
 		j.setStatus(JobStatusFailed)
 	} else {
 		j.setStatus(JobStatusSucceeded)
+	}
+	// unlease
+	if w.leaseBucket != nil {
+		<-w.leaseBucket
 	}
 	w.signalTick()
 }
@@ -307,14 +316,35 @@ func (w *Workflow) Reset() error {
 	if !w.isRunning.TryLock() {
 		return ErrWorkflowIsRunning
 	}
-	defer w.isRunning.Unlock()
+	w.isRunning.Unlock()
 
 	for j := range w.deps {
 		j.setStatus(JobStatusPending)
 	}
 	w.errs = nil
+	w.leaseBucket = nil
 	w.oneJobTerminated = nil
 	return nil
+}
+
+// Option alters the behavior of Workflow.
+type Option func(*Workflow)
+
+func (w *Workflow) WithOptions(opts ...Option) *Workflow {
+	for _, opt := range opts {
+		opt(w)
+	}
+	return w
+}
+
+// WithMaxConcurrency limits the max concurrency of running jobs.
+func WithMaxConcurrency(n int) Option {
+	return func(w *Workflow) {
+		// use buffered channel as a sized bucket
+		// a job needs to create a lease in the bucket to run,
+		// and remove the lease from the bucket when it's done.
+		w.leaseBucket = make(chan struct{}, n)
+	}
 }
 
 type ErrWorkflow map[Reporter]error
