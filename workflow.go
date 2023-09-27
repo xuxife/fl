@@ -67,7 +67,6 @@ func (w *Workflow) Run(ctx context.Context) error {
 	w.errs = make(ErrWorkflow)
 	w.oneJobTerminated = make(chan struct{})
 	// send the first signal to start tick
-	w.waitGroup.Add(1)
 	go w.signalTick()
 	// everytime one job terminated, tick
 	for range w.oneJobTerminated {
@@ -162,7 +161,6 @@ func (w *Workflow) preflight() error {
 
 func (w *Workflow) signalTick() {
 	w.oneJobTerminated <- struct{}{}
-	w.waitGroup.Done()
 }
 
 func (w *Workflow) tick(ctx context.Context) {
@@ -185,7 +183,6 @@ tick:
 		}
 		if !cond(es) {
 			j.setStatus(JobStatusCanceled)
-			w.waitGroup.Add(1)
 			go w.signalTick()
 			continue
 		}
@@ -196,7 +193,6 @@ tick:
 		}
 		if !when() {
 			j.setStatus(JobStatusSkipped)
-			w.waitGroup.Add(1)
 			go w.signalTick()
 			continue
 		}
@@ -207,7 +203,14 @@ tick:
 		// start the job
 		j.setStatus(JobStatusRunning)
 		w.waitGroup.Add(1)
-		go w.kickoff(ctx, j)
+		go func(ctx context.Context, j job) {
+			defer w.waitGroup.Done()
+			w.kickoff(ctx, j)
+			if w.leaseBucket != nil {
+				<-w.leaseBucket // unlease
+			}
+			w.signalTick()
+		}(ctx, j)
 	}
 }
 
@@ -240,11 +243,6 @@ func (w *Workflow) kickoff(ctx context.Context, j job) {
 	} else {
 		j.setStatus(JobStatusSucceeded)
 	}
-	// unlease
-	if w.leaseBucket != nil {
-		<-w.leaseBucket
-	}
-	w.signalTick()
 }
 
 func (w *Workflow) do(j job) func(ctx context.Context) error {
