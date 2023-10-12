@@ -5,14 +5,25 @@ import (
 	"fmt"
 )
 
-// Stage wraps a Workflow into a Job.
-// It's totally feasible to use Stage inside another Workflow.Add()
+// Stage wraps a Workflow into a Step.
+//
+// This is tricky, because we actually can use Workflow as a Step.
+//
+// Usage:
+//
+//	s := new(Workflow)
+//	// build s with many Steps.
+//	// then we can GROUP Workflow s as a Step and put it into a global Workflow
+//	stage := &Stage[I, O]{
+//		Name: "StageBuild"
+//		Workflow: s,
+//	}
 type Stage[I, O any] struct {
-	BaseIn[I]
+	StepBaseIn[I]
 	Name      string
 	Workflow  *Workflow
-	SetInput  func(I)  // SetInput sets the inside Jobs' Input from Stage Input
-	SetOutput func(*O) // SetOutput sets the Stage Output from the inside Jobs' Output
+	SetInput  func(I)  // SetInput sets the inside Steps' Input from Stage Input
+	SetOutput func(*O) // SetOutput sets the Stage Output from the inside Steps' Output
 }
 
 func (s *Stage[I, O]) String() string {

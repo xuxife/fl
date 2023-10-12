@@ -9,60 +9,60 @@ import (
 
 var DefaultRetryOption = RetryOption{
 	Backoff:  backoff.NewExponentialBackOff(),
-	MaxCount: 10,
+	Attempts: 10,
 	StopIf:   nil,
 	Timer:    nil,
 }
 
 type RetryOption struct {
 	Backoff  backoff.BackOff
-	MaxCount uint64
-	StopIf   func(n uint64, since time.Duration, err error) bool
+	Attempts uint64 // 0 means no limit
+	StopIf   func(ctx context.Context, attempt uint64, since time.Duration, err error) bool
 	Timer    backoff.Timer
 }
 
-func (opt *RetryOption) Run(
+func (opt *RetryOption) Default() {
+	if opt.Backoff == nil {
+		opt.Backoff = DefaultRetryOption.Backoff
+	}
+	if opt.Attempts == 0 {
+		opt.Attempts = DefaultRetryOption.Attempts
+	}
+	if opt.StopIf == nil {
+		opt.StopIf = DefaultRetryOption.StopIf
+	}
+	if opt.Timer == nil {
+		opt.Timer = DefaultRetryOption.Timer
+	}
+}
+
+func (s *Workflow) retry(opt *RetryOption) func(
 	ctx context.Context,
 	fn func(context.Context) error,
-	notAfter time.Time, // the timeout ddl
+	notAfter time.Time, // the Step level timeout ddl
 ) error {
-	b := DefaultRetryOption.Backoff
-	if opt.Backoff != nil {
-		b = opt.Backoff
+	return func(ctx context.Context, fn func(context.Context) error, notAfter time.Time) error {
+		opt.Default()
+		if opt.Attempts > 0 {
+			opt.Backoff = backoff.WithMaxRetries(opt.Backoff, opt.Attempts)
+		}
+		attempt := uint64(0)
+		start := time.Now()
+		return backoff.RetryNotifyWithTimer(
+			func() error {
+				err := fn(ctx)
+				if !notAfter.IsZero() && time.Now().After(notAfter) { // timeouted
+					err = backoff.Permanent(err)
+				}
+				if opt.StopIf != nil && opt.StopIf(ctx, attempt, time.Since(start), err) {
+					err = backoff.Permanent(err)
+				}
+				attempt++
+				return err
+			},
+			opt.Backoff,
+			nil,
+			opt.Timer,
+		)
 	}
-	maxCount := DefaultRetryOption.MaxCount
-	if opt.MaxCount > 0 {
-		maxCount = opt.MaxCount
-	}
-	if maxCount > 0 {
-		b = backoff.WithMaxRetries(b, maxCount)
-	}
-	stopIf := DefaultRetryOption.StopIf
-	if opt.StopIf != nil {
-		stopIf = opt.StopIf
-	}
-	timer := DefaultRetryOption.Timer
-	if opt.Timer != nil {
-		timer = opt.Timer
-	}
-
-	count := uint64(0)
-	start := time.Now()
-	var err error
-	return backoff.RetryNotifyWithTimer(
-		func() error {
-			err = fn(ctx)
-			if !notAfter.IsZero() && time.Now().After(notAfter) { // timeouted
-				err = backoff.Permanent(err)
-			}
-			if stopIf != nil && stopIf(count, time.Since(start), err) {
-				err = backoff.Permanent(err)
-			}
-			count++
-			return err
-		},
-		b,
-		nil,
-		timer,
-	)
 }

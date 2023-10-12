@@ -11,7 +11,7 @@ import (
 )
 
 func ExampleWorkflow() {
-	w := new(pl.Workflow)
+	suite := new(pl.Workflow)
 
 	{
 		// create jobs
@@ -19,39 +19,43 @@ func ExampleWorkflow() {
 		createAKSCluster := new(CreateAKSCluster)
 		getKubeConfig := new(GetAKSClusterCredential)
 
-		// connect jobs into workflow
-		w.Add(
-			pl.Job(createResourceGroup).
+		// connect steps into Workflow
+		suite.Add(
+			pl.Step(createResourceGroup).
 				// use Input to set the Input of a Job.
-				Input(func(i *CreateResourceGroupInput) {
+				Input(func(ctx context.Context, i *CreateResourceGroupInput) error {
 					i.Name = "rg"
 					i.Region = "eastus"
 					i.SubscriptionID = "sub"
+					return nil
 				}).
 				Retry(pl.RetryOption{
-					MaxCount: 10,
+					Attempts: 10,
 					Backoff:  backoff.NewExponentialBackOff(),
 					Timer:    new(testTimer),
 				}).
 				Condition(pl.Always),
 
-			pl.Job(createAKSCluster).
-				Input(func(i *CreateAKSClusterInput) {
+			pl.Step(createAKSCluster).
+				Input(func(_ context.Context, i *CreateAKSClusterInput) error {
 					i.Name = "aks-cluster"
+					return nil
 				}).
 				// use DependsOn to connects two Jobs with an adapter function.
 				DependsOn(
-					pl.Adapt(createResourceGroup, func(o CreateResourceGroupOutput, i *CreateAKSClusterInput) {
+					pl.Adapt(createResourceGroup, func(_ context.Context, o CreateResourceGroupOutput, i *CreateAKSClusterInput) error {
 						i.ResourceGroupName = o.Name
 						i.SubscriptionID = o.SubscriptionID
+						return nil
 					}),
 				),
 
-			pl.Job(getKubeConfig).
+			pl.Step(getKubeConfig).
 				DependsOn(
-					pl.Adapt(createAKSCluster, func(o CreateAKSClusterOutput, i *GetKubeConfigInput) {
+					pl.Adapt(createAKSCluster, func(_ context.Context, o CreateAKSClusterOutput, i *GetKubeConfigInput) error {
 						i.ClusterName = path.Join(o.SubscriptionID, o.Region, o.ResourceGroupName, o.Name)
 						i.Type = "Admin"
+						return nil
 					}),
 				),
 		)
@@ -64,8 +68,8 @@ func ExampleWorkflow() {
 			}, nil
 		})
 		preWorkflow := new(pl.Workflow).Add(
-			pl.Job(
-				pl.Consumer("helloworld", func(_ context.Context, in string) error {
+			pl.Step(
+				pl.FuncIn("helloworld", func(_ context.Context, in string) error {
 					fmt.Println(in)
 					return nil
 				}),
@@ -87,12 +91,13 @@ func ExampleWorkflow() {
 		}
 
 		// Stage can be used as a Job in a Workflow
-		w.Add(
-			pl.Job(preStage).
-				Input(func(in *PreCheckInput) {
+		suite.Add(
+			pl.Step(preStage).
+				Input(func(_ context.Context, in *PreCheckInput) error {
 					in.BuildID = "321"
+					return nil
 				}),
-			pl.Job(createResourceGroup).
+			pl.Step(createResourceGroup).
 				ExtraDependsOn(preStage),
 		)
 
@@ -102,60 +107,60 @@ func ExampleWorkflow() {
 				i.Region = o.Region
 			}, nil
 		})
-		w.Add(
+		suite.Add(
 			// use DirectDependsOn to connect two jobs with matched Input and Output
-			pl.Job(createAKSCluster).DirectDependsOn(passRegion),
-			pl.Job(passRegion).DirectDependsOn(createResourceGroup),
+			pl.Step(createAKSCluster).DirectDependsOn(passRegion),
+			pl.Step(passRegion).DirectDependsOn(createResourceGroup),
 		)
 	}
 
 	var getKubeConfig *GetAKSClusterCredential
 	// if already lose reference to the original jobs,
 	// use w.Dep() to get the Dependency and jobs inside.
-	for job := range w.Dep() {
-		switch typedJob := job.(type) {
+	for step := range suite.Dep() {
+		switch typedStep := step.(type) {
 		case *CreateAKSCluster:
 			// still able to inject jobs between createAKSCluster and its Dependers.
-			createAKSCluster := typedJob
-			patchCVE := pl.Consumer("PatchCVE", func(ctx context.Context, o CreateAKSClusterOutput) error {
+			createAKSCluster := typedStep
+			patchCVE := pl.FuncIn("PatchCVE", func(ctx context.Context, o CreateAKSClusterOutput) error {
 				// update the aks cluster with CVE patch
 				fmt.Println("patched!")
 				return nil
 			})
-			w.Add(
-				// use Jobs().DependsOn() if a data flow is not necessary,
+			suite.Add(
 				// in this case, dependers of createAKSCluster will wait for patchCVE to finish.
-				pl.Jobs(w.Dep().ListDependerOf(createAKSCluster)...).DependsOn(patchCVE),
-				pl.Job(patchCVE).DirectDependsOn(createAKSCluster),
+				pl.Steps(suite.Dep().DownstreamOf(createAKSCluster)...).DependsOn(patchCVE),
+				pl.Step(patchCVE).DirectDependsOn(createAKSCluster),
 			)
 		case *GetAKSClusterCredential:
-			getKubeConfig = typedJob
+			getKubeConfig = typedStep
 			// use Input() to add a dependency that modifies the Input of a Job.
-			w.Add(
-				pl.Job(getKubeConfig).
-					Input(func(i *GetKubeConfigInput) {
+			suite.Add(
+				pl.Step(getKubeConfig).
+					Input(func(_ context.Context, i *GetKubeConfigInput) error {
 						i.Type = "User"
+						return nil
 					}),
 			)
 		}
 	}
 
-	// use Run(context.Context) to kick off the workflow,
+	// use Run(context.Context) to kick off the Workflow,
 	// it will block the current goroutine.
-	err := w.Run(context.Background())
+	err := suite.Run(context.Background())
 
 	// the err returned from Run() is nil-able,
-	// if the workflow succeeded without error.
+	// if the Workflow succeeded without error.
 	fmt.Println(err)
 
-	// use IsTerminated() to check the workflow status,
-	// it may only be helpful when the workflow is running in another goroutine.
-	fmt.Println(w.IsTerminated())
+	// use IsTerminated() to check the Workflow status,
+	// it may only be helpful when the Workflow is running in another goroutine.
+	fmt.Println(suite.IsTerminated())
 
 	// use Err() to get the ErrWorkflow, do not compare it with nil, since it's always non-nil.
 	// use IsNil() to check whether the ErrWorkflow is empty.
-	werr := w.Err()
-	fmt.Println(werr.IsNil())
+	suiteErr := suite.Err()
+	fmt.Println(suiteErr.IsNil())
 
 	// get the output from the original jobs.
 	fmt.Println(pl.GetOutput(getKubeConfig))
@@ -170,7 +175,7 @@ func ExampleWorkflow() {
 }
 
 type CreateResourceGroup struct {
-	pl.BaseIn[CreateResourceGroupInput]
+	pl.StepBaseIn[CreateResourceGroupInput]
 }
 
 var count = 0
@@ -208,7 +213,7 @@ type CreateResourceGroupOutput struct {
 }
 
 type CreateAKSCluster struct {
-	pl.BaseIn[CreateAKSClusterInput]
+	pl.StepBaseIn[CreateAKSClusterInput]
 }
 
 func (c *CreateAKSCluster) Do(ctx context.Context) error {
@@ -244,7 +249,7 @@ type CreateAKSClusterOutput struct {
 }
 
 type GetAKSClusterCredential struct {
-	pl.BaseIn[GetKubeConfigInput] // output is kubeconfig
+	pl.StepBaseIn[GetKubeConfigInput] // output is kubeconfig
 }
 
 func (c *GetAKSClusterCredential) Do(ctx context.Context) error {

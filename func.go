@@ -6,39 +6,31 @@ import (
 	"reflect"
 )
 
-// Func constructs a Job from an arbitrary function
-func Func[I, O any](name string, do func(context.Context, I) (func(*O), error)) Jober[I, O] {
+// Func constructs a Step from an arbitrary function
+func Func[I, O any](name string, do func(context.Context, I) (func(*O), error)) Steper[I, O] {
 	return &func_[I, O]{name: name, do: do}
 }
 
-// Producer produces the Input for another job.
-func Producer[O any](name string, fn func(context.Context) (func(*O), error)) Jober[struct{}, O] {
-	if name == "" {
-		name = fmt.Sprintf("Producer(->%s)", typeOf[O]())
-	}
-	return Func(
-		name,
-		func(ctx context.Context, _ struct{}) (func(*O), error) {
-			return fn(ctx)
-		},
-	)
+func FuncIn[I any](name string, do func(context.Context, I) error) Steper[I, struct{}] {
+	return Func[I, struct{}](name, func(ctx context.Context, i I) (func(*struct{}), error) {
+		return nil, do(ctx, i)
+	})
 }
 
-// Consumer consumes the Output from another job.
-func Consumer[I any](name string, fn func(context.Context, I) error) Jober[I, struct{}] {
-	if name == "" {
-		name = fmt.Sprintf("Consumer(%s->)", typeOf[I]())
-	}
-	return Func(
-		name,
-		func(ctx context.Context, i I) (func(*struct{}), error) {
-			return nil, fn(ctx, i)
-		},
-	)
+func FuncOut[O any](name string, do func(context.Context) (func(*O), error)) Steper[struct{}, O] {
+	return Func[struct{}, O](name, func(ctx context.Context, _ struct{}) (func(*O), error) {
+		return do(ctx)
+	})
+}
+
+func FuncNoInOut(name string, do func(context.Context) error) Steper[struct{}, struct{}] {
+	return Func[struct{}, struct{}](name, func(ctx context.Context, s struct{}) (func(*struct{}), error) {
+		return nil, do(ctx)
+	})
 }
 
 type func_[I, O any] struct {
-	BaseIn[I]
+	StepBaseIn[I]
 	name   string
 	do     func(context.Context, I) (func(*O), error)
 	output func(*O)
@@ -63,7 +55,7 @@ func (f *func_[I, O]) Output(o *O) {
 	}
 }
 
-func typeOf[T any]() reflect.Type {
-	var t T
-	return reflect.TypeOf(t)
+func typeOf[A any]() reflect.Type {
+	var a A
+	return reflect.TypeOf(a)
 }

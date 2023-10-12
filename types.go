@@ -2,18 +2,17 @@ package pl
 
 import (
 	"context"
-	"fmt"
 )
 
-// Jober[I, O any] is the basic unit of a Workflow.
+// Steper[I, O any] is the basic unit of a Workflow.
 //
 //	I: input type
 //	O: output type
 //
-// A Jober implement should always embed Base.
+// A Steper implement should always embed StepBase.
 //
 //	type SomeTask struct {
-//		Base // always embed Base
+//		StepBase // always embed StepBase
 //	}
 //
 // Then please implement the following interfaces:
@@ -28,54 +27,53 @@ import (
 //	type SomeTask struct {
 //		BaseIn[TaskInput] // inherit `Input() *TaskInput`
 //	}
-type Jober[I, O any] interface {
-	base
-	fmt.Stringer
-	Inputer[I]
-	Outputer[O]
-	Doer
+type Steper[I, O any] interface {
+	StepDoer
+	inputer[I]
+	outputer[O]
 }
 
-type Inputer[I any] interface {
+type inputer[I any] interface {
 	Input() *I
 }
 
-type Outputer[O any] interface {
+type outputer[O any] interface {
 	Output(*O)
 }
 
-type Doer interface {
+// StepDoer is the non-generic version of Steper.
+type StepDoer interface {
+	stepBase
 	Do(context.Context) error
+	StepReader
 }
 
-type job interface {
-	base
-	Doer
-	Reporter
+// aka. downstream / client
+type depender[I any] interface {
+	StepDoer
+	inputer[I]
 }
 
-type Depender[I any] interface {
-	job
-	Inputer[I]
+// aka. upstream / provider
+type dependee[O any] interface {
+	StepDoer
+	outputer[O]
 }
 
-type Dependee[O any] interface {
-	job
-	Outputer[O]
-}
-
-// Dependency is a relationship between Depender(s) and Dependee(s).
+// dependency is a relationship between Depender(s) and Dependee(s).
 // We say "A depends on B", or "B happened-before A", then A is Depender, B is Dependee.
-type Dependency map[job][]link
+type dependency map[StepDoer][]link
 
+// link represents one connection between a Depender and a Dependee,
+// with the data Flow function.
 type link struct {
-	Dependee job
-	Flow     func() // Flow sends Dependee's Output to Depender's Input
+	Dependee StepDoer
+	Flow     func(context.Context) error // Flow sends Dependee's Output to Depender's Input
 }
 
-// ListDependeeOf returns all Dependee(s) of a Depender.
-func (d Dependency) ListDependeeOf(depender job) []job {
-	var dependees []job
+// UpstreamOf returns all Dependee(s) of a Depender.
+func (d dependency) UpstreamOf(depender StepDoer) []StepDoer {
+	var dependees []StepDoer
 	for _, l := range d[depender] {
 		if l.Dependee != nil {
 			dependees = append(dependees, l.Dependee)
@@ -84,9 +82,10 @@ func (d Dependency) ListDependeeOf(depender job) []job {
 	return dependees
 }
 
-// ListDependerOf returns all Depender(s) of a Dependee.
-func (d Dependency) ListDependerOf(dependee job) []job {
-	var dependers []job
+// DownstreamOf returns all Depender(s) of a Dependee.
+// WARNING: this is expensive
+func (d dependency) DownstreamOf(dependee StepDoer) []StepDoer {
+	var dependers []StepDoer
 	for r, links := range d {
 		for _, l := range links {
 			if l.Dependee == dependee {
@@ -98,8 +97,17 @@ func (d Dependency) ListDependerOf(dependee job) []job {
 	return dependers
 }
 
-// Merge merges other Dependency into this Dependency.
-func (d Dependency) Merge(other Dependency) {
+// Steps returns all Steps in this Workflow.
+func (d dependency) Steps() []StepDoer {
+	var steps []StepDoer
+	for s := range d {
+		steps = append(steps, s)
+	}
+	return steps
+}
+
+// merge merges other Dependency into this Dependency.
+func (d dependency) merge(other dependency) {
 	for r, links := range other {
 		d[r] = append(d[r], links...)
 		// need to add the Dependee(s) as key(s) also
@@ -114,8 +122,8 @@ func (d Dependency) Merge(other Dependency) {
 }
 
 // this is for Workflow checking Condition
-func (d Dependency) listDepedeeReporterOf(r job) []Reporter {
-	var dependees []Reporter
+func (d dependency) listUpstreamReporterOf(r StepDoer) []StepReader {
+	var dependees []StepReader
 	for _, l := range d[r] {
 		if l.Dependee != nil {
 			dependees = append(dependees, l.Dependee)
